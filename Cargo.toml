@@ -1,0 +1,29 @@
+[package]
+name = "image-watch"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+argon2 = { version = "0.5.3" }
+axum = { version = "0.8.4", features = ["ws"] }
+base64 = { version = "0.22.1" }
+dotenvy = { version = "0.15.7" }
+headers = { version = "0.4.1" }
+mime_guess = { version = "2.0.5" }
+rust-embed = { version = "8.7.2", features = ["debug-embed", "deterministic-timestamps"] }
+serde = { version = "1.0.219", features = ["default", "derive"] }
+serde_json = { version = "1.0.142" }
+serde_with = { version = "3.14.0" }
+shellexpand = { version = "3.1.1" }
+tokio = { version = "1.47.1", features = ["rt-multi-thread", "signal"] }
+tower-http = { version = "0.6.6", features = ["fs", "trace"] }
+tracing = { version = "0.1.41" }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+thiserror = { version = "2.0.14" }
+walkdir = { version = "2.5.0" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = 0
