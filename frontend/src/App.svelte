@@ -81,6 +81,7 @@
           src={`/data/${img.name}`}
           alt={img.name}
           class="w-full h-full object-cover transition duration-300 group-hover:brightness-75"
+          loading="lazy"
         />
         <div
           class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
