@@ -26,7 +26,7 @@ use std::{
     sync::{Arc, Weak},
     time::Duration,
 };
-use tower_http::{services::fs::ServeDir, trace, trace::TraceLayer};
+use tower_http::{compression::CompressionLayer, services::fs::ServeDir, trace, trace::TraceLayer};
 use tracing::{Level, instrument};
 use web_socket_actor::WebSocketActorHandler;
 
@@ -115,12 +115,20 @@ async fn main() -> Result<()> {
         }));
     }
 
-    // must happen after adding auth layer so failed auth gets logged
-    app = app.layer(
-        TraceLayer::new_for_http()
-            .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
-            .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
-    );
+    // tracing must happen after adding auth layer so failed auth gets logged
+    app = app
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
+                .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
+        )
+        .layer(
+            CompressionLayer::new()
+                .br(true)
+                .deflate(true)
+                .gzip(true)
+                .zstd(true),
+        );
 
     axum::serve(listener, app)
         .with_graceful_shutdown(tokio_util::shutdown_signal())
