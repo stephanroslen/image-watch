@@ -1,8 +1,27 @@
 <script>
-  import { fade, fly } from "svelte/transition";
+  import device from "current-device";
+  import { fade } from "svelte/transition";
 
   let images = $state([]);
   let dummy_images = [];
+
+  let type = device.type;
+  let orientation = $state(device.orientation);
+  device.onChangeOrientation(
+    (newOrientation) => (orientation = newOrientation),
+  );
+
+  let grid_columns = $derived(
+    type === "mobile"
+      ? orientation === "landscape"
+        ? 2
+        : 1
+      : type === "tablet"
+        ? orientation === "landscape"
+          ? 3
+          : 2
+        : 3,
+  );
 
   const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
@@ -46,7 +65,12 @@
 <main>
   <h1 class="text-center">Image Watch</h1>
 
-  <div class="w-[90%] mx-auto grid grid-cols-3 gap-4">
+  <div
+    class="w-[90%] mx-auto grid gap-4"
+    class:grid-cols-1={grid_columns === 1}
+    class:grid-cols-2={grid_columns === 2}
+    class:grid-cols-3={grid_columns === 3}
+  >
     {#each images as img (img.name)}
       <div
         class="relative group rounded-xl overflow-hidden"

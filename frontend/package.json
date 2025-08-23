@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.12",
+    "current-device": "^0.10.2",
     "daisyui": "^5.0.50",
     "tailwindcss": "^4.1.12"
   }
