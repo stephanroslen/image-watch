@@ -3,11 +3,12 @@ use crate::shutdown_actor::ShutdownActorHandler;
 use std::cmp::Reverse;
 use std::{
     collections::HashSet,
+    mem::take,
     path::PathBuf,
     sync::{Arc, Weak},
     time::Duration,
 };
-use tokio::{sync::mpsc, time::Interval};
+use tokio::{sync::mpsc, task::spawn_blocking, time::Interval};
 use tracing::instrument;
 
 #[derive(Debug)]
@@ -47,47 +48,55 @@ impl FileChangeTrackerActor {
 
     #[instrument]
     async fn rescrape(&mut self) -> crate::error::Result<()> {
-        let found: HashSet<_> = walkdir::WalkDir::new(&self.path_prefix)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().is_file())
-            .filter_map(|e| {
-                e.path()
-                    .strip_prefix(&self.path_prefix)
-                    .map(|p| p.to_path_buf())
-                    .ok()
-            })
-            .filter_map(|e| {
-                let extension = e.extension()?.to_str()?;
-                if self.file_extensions.contains(extension) {
-                    Some(e)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let known_files = take(&mut self.known_files);
+        let path_prefix = self.path_prefix.clone();
+        let file_extensions = self.file_extensions.clone();
 
-        let file_change_data = crate::file_change_data::FileChangeData::new(
-            self.known_files.difference(&found).cloned().collect(),
-            {
-                let mut tmp: Vec<_> = found
-                    .difference(&self.known_files)
-                    .cloned()
-                    .map(|p| {
-                        let timestamp = self
-                            .path_prefix
-                            .join(p.clone())
-                            .metadata()
-                            .expect("Expected metadata to exit")
-                            .modified()
-                            .expect("Expected modification data to be retrievable");
-                        (p, timestamp)
-                    })
-                    .collect();
-                tmp.sort_by_key(|(_, time)| Reverse(*time));
-                tmp
-            },
-        );
+        let (found, file_change_data) = spawn_blocking(move || {
+            let found: HashSet<_> = walkdir::WalkDir::new(&path_prefix)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().is_file())
+                .filter_map(|e| {
+                    e.path()
+                        .strip_prefix(&path_prefix)
+                        .map(|p| p.to_path_buf())
+                        .ok()
+                })
+                .filter_map(|e| {
+                    let extension = e.extension()?.to_str()?;
+                    if file_extensions.contains(extension) {
+                        Some(e)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let file_change_data = crate::file_change_data::FileChangeData::new(
+                known_files.difference(&found).cloned().collect(),
+                {
+                    let mut tmp: Vec<_> = found
+                        .difference(&known_files)
+                        .cloned()
+                        .map(|p| {
+                            let timestamp = path_prefix
+                                .join(p.clone())
+                                .metadata()
+                                .expect("Expected metadata to exit")
+                                .modified()
+                                .expect("Expected modification data to be retrievable");
+                            (p, timestamp)
+                        })
+                        .collect();
+                    tmp.sort_by_key(|(_, time)| Reverse(*time));
+                    tmp
+                },
+            );
+
+            (found, file_change_data)
+        })
+        .await?;
 
         if file_change_data.is_not_empty() {
             tracing::debug!("file change data: {:?}", &file_change_data);
