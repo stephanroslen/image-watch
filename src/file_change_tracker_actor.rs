@@ -79,14 +79,13 @@ impl FileChangeTrackerActor {
                     let mut tmp: Vec<_> = found
                         .difference(&known_files)
                         .cloned()
-                        .map(|p| {
-                            let timestamp = path_prefix
-                                .join(p.clone())
+                        .filter_map(|path| {
+                            path_prefix
+                                .join(path.clone())
                                 .metadata()
-                                .expect("Expected metadata to exit")
-                                .modified()
-                                .expect("Expected modification data to be retrievable");
-                            (p, timestamp)
+                                .ok()
+                                .and_then(|metadata| metadata.modified().ok())
+                                .map(|timestamp| (path, timestamp))
                         })
                         .collect();
                     tmp.sort_by_key(|(_, time)| Reverse(*time));
