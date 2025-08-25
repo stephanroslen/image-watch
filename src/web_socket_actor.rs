@@ -1,5 +1,6 @@
 use crate::file_change_data::{FileAddData, FileChangeData, FileRemoveData};
 use axum::extract::ws::{Message, WebSocket};
+use itertools::Itertools;
 use std::time::Duration;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::instrument;
@@ -43,10 +44,12 @@ impl WebSocketActor {
         let adds = change.added.0;
         let removes = change.removed.0;
 
-        let mut multi_adds = adds
+        let mut multi_adds: Vec<Vec<_>> = adds
+            .into_iter()
             .chunks(self.file_add_chunk_size)
-            .map(|c| c.iter().cloned().collect::<Vec<_>>())
-            .collect::<Vec<_>>();
+            .into_iter()
+            .map(|chunk| chunk.collect())
+            .collect();
 
         let change = FileChangeData {
             removed: FileRemoveData(removes),

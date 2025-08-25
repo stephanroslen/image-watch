@@ -9,6 +9,7 @@ axum = { version = "0.8.4", features = ["ws"] }
 base64 = { version = "0.22.1" }
 dotenvy = { version = "0.15.7" }
 headers = { version = "0.4.1" }
+itertools = { version = "0.14.0" }
 mime_guess = { version = "2.0.5" }
 rust-embed = { version = "8.7.2", features = ["debug-embed", "deterministic-timestamps"] }
 serde = { version = "1.0.219", features = ["default", "derive"] }
