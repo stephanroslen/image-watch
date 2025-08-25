@@ -1,9 +1,8 @@
 use crate::file_change_data::{FileAddData, FileChangeData, FileRemoveData};
 use crate::shutdown_actor::ShutdownActorHandler;
 use crate::web_socket_actor::WebSocketActorHandler;
-use serde_json::json;
-use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::{mem::take, sync::Arc};
+use tokio::{sync::mpsc, task::spawn_blocking};
 use tracing::instrument;
 
 #[derive(Debug)]
@@ -33,54 +32,61 @@ impl FileTrackerActor {
 
     #[instrument]
     async fn handle_change(&mut self, change: FileChangeData) {
-        let FileChangeData { removed, added } = &change;
+        tracing::info!("known files changed: {:?}", &change);
 
-        tracing::info!("known files changed: {}", json!(change));
+        {
+            let mut new_handlers = Vec::new();
 
-        let mut new_baseline =
-            Vec::with_capacity(self.baseline.0.len() + added.0.len() - removed.0.len());
+            for handler in self.web_socket_actor_handlers.drain(..) {
+                let result = handler.send_change(change.clone()).await;
+                match result {
+                    Ok(_) => {
+                        new_handlers.push(handler);
+                    }
+                    Err(_) => {
+                        handler
+                            .join_handle()
+                            .await
+                            .expect("Expected handle to be joinable");
+                    }
+                }
+            }
 
-        let (mut idx_baseline, mut index_added) = (0usize, 0usize);
-        let (baseline_len, added_len) = (self.baseline.0.len(), added.0.len());
-        while idx_baseline < baseline_len || index_added < added_len {
-            if idx_baseline < baseline_len && removed.0.contains(&self.baseline.0[idx_baseline].0) {
-                idx_baseline += 1;
-            } else {
-                if index_added < added_len {
+            self.web_socket_actor_handlers = new_handlers;
+        }
+
+        let baseline = take(&mut self.baseline);
+
+        let new_baseline = spawn_blocking(move || {
+            let FileChangeData { removed, added } = &change;
+
+            let mut new_baseline =
+                Vec::with_capacity(baseline.0.len() + added.0.len() - removed.0.len());
+
+            let (mut idx_baseline, mut index_added) = (0usize, 0usize);
+            let (baseline_len, added_len) = (baseline.0.len(), added.0.len());
+            while idx_baseline < baseline_len || index_added < added_len {
+                if idx_baseline < baseline_len && removed.0.contains(&baseline.0[idx_baseline].0) {
+                    idx_baseline += 1;
+                } else if index_added < added_len {
                     if idx_baseline < baseline_len
-                        && self.baseline.0[idx_baseline].1 > added.0[index_added].1
+                        && baseline.0[idx_baseline].1 > added.0[index_added].1
                     {
-                        new_baseline.push(self.baseline.0[idx_baseline].clone());
+                        new_baseline.push(baseline.0[idx_baseline].clone());
                         idx_baseline += 1;
                     } else {
                         new_baseline.push(added.0[index_added].clone());
                         index_added += 1;
                     }
                 } else {
-                    new_baseline.push(self.baseline.0[idx_baseline].clone());
+                    new_baseline.push(baseline.0[idx_baseline].clone());
                     idx_baseline += 1;
                 }
             }
-        }
-
-        let mut new_handlers = Vec::new();
-
-        for handler in self.web_socket_actor_handlers.drain(..) {
-            let result = handler.send_change(change.clone()).await;
-            match result {
-                Ok(_) => {
-                    new_handlers.push(handler);
-                }
-                Err(_) => {
-                    handler
-                        .join_handle()
-                        .await
-                        .expect("Expected handle to be joinable");
-                }
-            }
-        }
-
-        self.web_socket_actor_handlers = new_handlers;
+            new_baseline
+        })
+        .await
+        .expect("Expected task to complete");
 
         tracing::debug!("new baseline: {:?}", &new_baseline);
 

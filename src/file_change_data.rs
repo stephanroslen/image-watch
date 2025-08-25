@@ -3,7 +3,7 @@ use serde_with::{TimestampMilliSeconds, serde_as};
 use std::{path::PathBuf, time::SystemTime};
 
 #[serde_as]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct FileAddData(
     #[serde_as(as = "Vec<(_, TimestampMilliSeconds<i64>)>")] pub Vec<(PathBuf, SystemTime)>,
 );
