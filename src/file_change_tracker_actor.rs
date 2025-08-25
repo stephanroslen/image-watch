@@ -8,7 +8,11 @@ use std::{
     sync::{Arc, Weak},
     time::Duration,
 };
-use tokio::{sync::mpsc, task::spawn_blocking, time::Interval};
+use tokio::{
+    sync::mpsc,
+    task::spawn_blocking,
+    time::{Interval, MissedTickBehavior},
+};
 use tracing::instrument;
 
 #[derive(Debug)]
@@ -33,7 +37,9 @@ impl FileChangeTrackerActor {
         file_extensions: Vec<String>,
     ) -> Self {
         let file_extensions = file_extensions.into_iter().collect();
-        let rescrape_timer = tokio::time::interval(rescrape_interval);
+        let mut rescrape_timer = tokio::time::interval(rescrape_interval);
+        // continue with intended interval even if the timer is missed
+        rescrape_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let known_files = HashSet::new();
 
         Self {
