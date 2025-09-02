@@ -59,6 +59,16 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WsState>>) -> 
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let result = image_watch().await;
+
+    if let Err(e) = &result {
+        eprintln!("Error: {}", e);
+    }
+
+    result
+}
+
+async fn image_watch() -> Result<()> {
     panic::set_hook(Box::new(|info| {
         tracing::error!("Task panic: {}", info);
         process::exit(1);
