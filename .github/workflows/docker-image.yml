@@ -32,7 +32,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-            type=sha,enable=true,priority=100,prefix=,suffix=,format=short
+            type=sha,enable=true,priority=100,prefix=,suffix=,format=long
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
