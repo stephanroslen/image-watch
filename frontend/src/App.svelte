@@ -23,43 +23,69 @@
         : 3,
   );
 
-  const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
+  let ws;
+  let reconnectTimeout = 1000;
+  let maxReconnectTimeout = 10000;
 
-  let reloader = (event) => {
-    setTimeout(() => {
-      location.reload();
-    }, 10000);
-  };
+  function connect() {
+    const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
 
-  ws.onclose = reloader;
-  ws.onerror = reloader;
+    ws.addEventListener("open", () => {
+      dummy_images = [];
+      reconnectTimeout = 1000;
+      console.log("WebSocket connected");
+    });
 
-  function insertSorted(img) {
-    let i = 0;
-    while (i < dummy_images.length && dummy_images[i].timestamp > img.timestamp)
-      i++;
-    dummy_images = [...dummy_images.slice(0, i), img, ...dummy_images.slice(i)];
+    ws.addEventListener("close", () => {
+      console.log("WebSocket closed, reconnecting...");
+      scheduleReconnect();
+    });
+
+    ws.addEventListener("error", (err) => {
+      console.log("WebSocket error", err);
+      scheduleReconnect();
+    });
+
+    ws.addEventListener("message", (event) => {
+      const data = JSON.parse(event.data);
+
+      if (data.removed) {
+        const removedSet = new Set(data.removed);
+        dummy_images = dummy_images.filter((img) => !removedSet.has(img.name));
+      }
+
+      for (const [name, timestamp] of data.added ?? []) {
+        insertSorted({ name, timestamp });
+      }
+
+      images = dummy_images;
+    });
+
+    function scheduleReconnect() {
+      setTimeout(() => {
+        connect();
+      }, reconnectTimeout);
+
+      reconnectTimeout = Math.min(reconnectTimeout * 2, maxReconnectTimeout);
+    }
+
+    function insertSorted(img) {
+      let i = 0;
+      while (
+        i < dummy_images.length &&
+        dummy_images[i].timestamp > img.timestamp
+      )
+        i++;
+      dummy_images = [
+        ...dummy_images.slice(0, i),
+        img,
+        ...dummy_images.slice(i),
+      ];
+    }
   }
 
-  ws.addEventListener("message", (event) => {
-    const start = Date.now();
-
-    const data = JSON.parse(event.data);
-
-    if (data.removed) {
-      const removedSet = new Set(data.removed);
-      dummy_images = dummy_images.filter((img) => !removedSet.has(img.name));
-    }
-
-    for (const [name, timestamp] of data.added ?? []) {
-      insertSorted({ name, timestamp });
-    }
-
-    images = dummy_images;
-
-    console.log(`Time elapsed: ${Date.now() - start} ms`);
-  });
+  connect();
 </script>
 
 <main>
