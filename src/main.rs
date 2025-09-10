@@ -29,6 +29,7 @@ use std::{
 use tokio::task::JoinSet;
 use tower_http::{compression::CompressionLayer, services::fs::ServeDir, trace, trace::TraceLayer};
 use tracing::{Level, instrument};
+use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 use web_socket_actor::WebSocketActorHandler;
 
 #[derive(Debug)]
@@ -64,7 +65,7 @@ async fn main() -> Result<()> {
     let result = image_watch(&mut join_set).await;
 
     if let Err(e) = &result {
-        eprintln!("Error: {}", e);
+        tracing::error!("Error: {}", e);
     }
 
     join_set.join_all().await;
@@ -80,9 +81,15 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
 
     let shutdown_handler = ShutdownActorHandler::new(join_set);
 
-    dotenvy::dotenv()?;
+    let dotenvy_result = dotenvy::dotenv();
 
-    tracing_subscriber::fmt::init();
+    let filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy();
+
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+
+    let _ = dotenvy_result.inspect_err(|e| tracing::warn!("Couldn't load .env: {}", e));
 
     tracing::info!("Starting server");
 
