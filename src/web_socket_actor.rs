@@ -1,5 +1,8 @@
-use crate::file_change_data::{FileAddData, FileChangeData, FileRemoveData};
-use axum::extract::ws::{Message, WebSocket};
+use crate::{
+    error::Result,
+    file_change_data::{FileAddData, FileChangeData, FileRemoveData},
+};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
 use itertools::Itertools;
 use std::time::Duration;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -33,14 +36,14 @@ impl WebSocketActor {
         }
     }
 
-    async fn send_change(&mut self, change: FileChangeData) -> crate::error::Result<()> {
+    async fn send_change(&mut self, change: FileChangeData) -> Result<()> {
         Ok(self
             .ws
             .send(Message::Text(serde_json::to_string(&change)?.into()))
             .await?)
     }
 
-    async fn send_change_chunked(&mut self, change: FileChangeData) -> crate::error::Result<()> {
+    async fn send_change_chunked(&mut self, change: FileChangeData) -> Result<()> {
         let adds = change.added.0;
         let removes = change.removed.0;
 
@@ -73,6 +76,13 @@ impl WebSocketActor {
         Ok(())
     }
 
+    fn send_close_frame(&mut self) -> impl Future<Output = std::result::Result<(), axum::Error>> {
+        self.ws.send(Message::Close(Some(CloseFrame {
+            code: close_code::AWAY,
+            reason: "".into(),
+        })))
+    }
+
     #[instrument]
     async fn run(mut self) {
         tracing::debug!("actor started");
@@ -88,6 +98,7 @@ impl WebSocketActor {
                             }
                         },
                         None => {
+                            let _ = self.send_close_frame().await.inspect_err(|e| tracing::warn!("failed to send close frame: {}", e));
                             break;
                         },
                     }
@@ -122,7 +133,7 @@ impl WebSocketActorHandler {
         }
     }
 
-    pub async fn send_change(&self, change: FileChangeData) -> crate::error::Result<()> {
+    pub async fn send_change(&self, change: FileChangeData) -> Result<()> {
         self.sender
             .send(WebSocketActorEvent::Change(change))
             .await?;
