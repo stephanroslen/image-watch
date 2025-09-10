@@ -3,6 +3,8 @@
   import { fade } from "svelte/transition";
 
   let images = $state([]);
+  let connected = $state(false);
+
   let dummy_images = [];
 
   let type = device.type;
@@ -32,17 +34,20 @@
     ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
 
     ws.addEventListener("open", () => {
+      connected = true;
       dummy_images = [];
       reconnectTimeout = 1000;
       console.log("WebSocket connected");
     });
 
     ws.addEventListener("close", () => {
+      connected = false;
       console.log("WebSocket closed, reconnecting...");
       scheduleReconnect();
     });
 
     ws.addEventListener("error", (err) => {
+      connected = false;
       console.log("WebSocket error", err);
       scheduleReconnect();
     });
@@ -89,36 +94,41 @@
 </script>
 
 <main>
-  <h1 class="text-center">Image Watch</h1>
-
-  <div
-    class="w-[90%] mx-auto grid gap-4"
-    class:grid-cols-1={grid_columns === 1}
-    class:grid-cols-2={grid_columns === 2}
-    class:grid-cols-3={grid_columns === 3}
-  >
-    {#each images as img (img.name)}
-      <div
-        class="relative group rounded-xl overflow-hidden"
-        in:fade={{ duration: 300 }}
-        out:fade={{ duration: 100 }}
-      >
-        <img
-          src={`/data/${img.name}`}
-          alt={img.name}
-          class="w-full h-full object-cover transition duration-300 group-hover:brightness-75"
-          loading="lazy"
-        />
-        <div
-          class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
-        >
-          <span
-            class="block text-white text-lg font-bold bg-black/20 px-2 rounded"
-            >{img.name}</span
-          >
-        </div>
+  {#if !connected}
+    <div class="fixed top-0 right-0 m-4 z-50">
+      <div role="alert" class="alert alert-error">
+        <span class="loading loading-spinner loading-xs"></span>
+        <span>WebSocket connection lost - reconnecting!</span>
       </div>
-    {/each}
+    </div>
+  {/if}
+
+  <div class="p-4">
+    <h1 class="text-3xl font-bold mb-8">Image Watch</h1>
+
+    <div
+      class="w-[95%] mx-auto grid gap-4 bg-neutral-content text-neutral-content rounded-xl p-4 min-h-[calc(100vh-180px)] place-content-start"
+      class:grid-cols-1={grid_columns === 1}
+      class:grid-cols-2={grid_columns === 2}
+      class:grid-cols-3={grid_columns === 3}
+    >
+      {#each images as img (img.name)}
+        <div
+          class="rounded-xl"
+          in:fade={{ duration: 300 }}
+          out:fade={{ duration: 100 }}
+        >
+          <div class="tooltip tooltip-info tooltip-bottom" data-tip={img.name}>
+            <img
+              src={`/data/${img.name}`}
+              alt={img.name}
+              class="w-full h-full transition duration-300"
+              loading="lazy"
+            />
+          </div>
+        </div>
+      {/each}
+    </div>
   </div>
 </main>
 

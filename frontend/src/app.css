@@ -3,5 +3,5 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 
 @plugin "daisyui" {
-  themes: corporate --default;
+  themes: light --default;
 }
