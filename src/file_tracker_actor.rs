@@ -3,6 +3,8 @@ use crate::{
     file_change_data::{FileAddData, FileChangeData, FileRemoveData},
     web_socket_actor::WebSocketActorHandler,
 };
+use axum::extract::ws::WebSocket;
+use std::time::Duration;
 use std::{mem::take, sync::Arc};
 use tokio::{
     sync::mpsc,
@@ -13,23 +15,31 @@ use tracing::instrument;
 #[derive(Debug)]
 enum FileTrackerActorEvent {
     Change(FileChangeData),
-    AddWebSocketActorHandler(WebSocketActorHandler),
+    AddWebSocket(WebSocket),
 }
 
 #[derive(Debug)]
 struct FileTrackerActor {
     receiver: mpsc::Receiver<FileTrackerActorEvent>,
+    file_add_chunk_size: usize,
+    file_add_chunk_delay: Duration,
     baseline: FileAddData,
     web_socket_actor_handlers: Vec<WebSocketActorHandler>,
 }
 
 impl FileTrackerActor {
-    fn new(receiver: mpsc::Receiver<FileTrackerActorEvent>) -> Self {
+    fn new(
+        receiver: mpsc::Receiver<FileTrackerActorEvent>,
+        file_add_chunk_size: usize,
+        file_add_chunk_delay: Duration,
+    ) -> Self {
         let baseline = FileAddData::new();
         let web_socket_actor_handlers = Vec::new();
 
         Self {
             receiver,
+            file_add_chunk_size,
+            file_add_chunk_delay,
             baseline,
             web_socket_actor_handlers,
         }
@@ -106,8 +116,13 @@ impl FileTrackerActor {
                 FileTrackerActorEvent::Change(change) => {
                     self.handle_change(change).await;
                 }
-                FileTrackerActorEvent::AddWebSocketActorHandler(handler) => {
-                    tracing::debug!("adding web socket actor handler");
+                FileTrackerActorEvent::AddWebSocket(ws) => {
+                    tracing::debug!("adding web socket");
+                    let handler = WebSocketActorHandler::new(
+                        ws,
+                        self.file_add_chunk_size,
+                        self.file_add_chunk_delay,
+                    );
                     let result = handler
                         .send_change(FileChangeData {
                             removed: FileRemoveData(Vec::new()),
@@ -138,9 +153,13 @@ pub struct FileTrackerActorHandler {
 }
 
 impl FileTrackerActorHandler {
-    pub fn new(join_set: &mut JoinSet<()>) -> Result<Arc<Self>> {
+    pub fn new(
+        join_set: &mut JoinSet<()>,
+        file_add_chunk_size: usize,
+        file_add_chunk_delay: Duration,
+    ) -> Result<Arc<Self>> {
         let (tx, rx) = mpsc::channel::<FileTrackerActorEvent>(8);
-        let actor = FileTrackerActor::new(rx);
+        let actor = FileTrackerActor::new(rx, file_add_chunk_size, file_add_chunk_delay);
         join_set.spawn(actor.run());
 
         let result = Arc::from(Self { sender: tx });
@@ -154,9 +173,9 @@ impl FileTrackerActorHandler {
         Ok(())
     }
 
-    pub async fn add_web_socket_actor_handler(&self, handler: WebSocketActorHandler) -> Result<()> {
+    pub async fn add_web_socket(&self, ws: WebSocket) -> Result<()> {
         self.sender
-            .send(FileTrackerActorEvent::AddWebSocketActorHandler(handler))
+            .send(FileTrackerActorEvent::AddWebSocket(ws))
             .await?;
         Ok(())
     }

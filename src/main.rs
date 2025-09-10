@@ -22,19 +22,15 @@ use serve_frontend::serve_frontend;
 use std::{
     panic, process,
     sync::{Arc, Weak},
-    time::Duration,
 };
 use tokio::task::JoinSet;
 use tower_http::{compression::CompressionLayer, services::fs::ServeDir, trace, trace::TraceLayer};
 use tracing::{Level, instrument};
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
-use web_socket_actor::WebSocketActorHandler;
 
 #[derive(Debug)]
 struct WsState {
     file_tracker_actor_handler: Weak<FileTrackerActorHandler>,
-    file_add_chunk_size: usize,
-    file_add_chunk_delay: Duration,
 }
 
 #[instrument]
@@ -44,15 +40,10 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WsState>>) -> 
         let file_tracker_actor_handler = state.file_tracker_actor_handler.upgrade();
         if let Some(file_tracker_actor_handler) = file_tracker_actor_handler {
             tracing::debug!("got file tracker actor handler");
-            let web_socket_actor_handler = WebSocketActorHandler::new(
-                socket,
-                state.file_add_chunk_size,
-                state.file_add_chunk_delay,
-            );
             file_tracker_actor_handler
-                .add_web_socket_actor_handler(web_socket_actor_handler)
+                .add_web_socket(socket)
                 .await
-                .expect("Expected to be able to add web socket actor handler");
+                .expect("Expected to be able to add web socket");
         }
     })
 }
@@ -91,11 +82,11 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&config.listen_address).await?;
 
-    let file_tracker_actor_handler = FileTrackerActorHandler::new(join_set)?;
-
-    ,
+    let file_tracker_actor_handler = FileTrackerActorHandler::new(
+        join_set,
         config.file_add_chunk_size,
-        config.file_add_chunk_delay, )?;
+        config.file_add_chunk_delay,
+    )?;
 
     let serve_dir_service = ServeDir::new(&config.serve_dir).fallback(get(axum_util::not_found));
 
@@ -107,8 +98,6 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
         .fallback(get(axum_util::not_found))
         .with_state(Arc::new(WsState {
             file_tracker_actor_handler: Arc::downgrade(&file_tracker_actor_handler),
-            file_add_chunk_size: config.file_add_chunk_size,
-            file_add_chunk_delay: config.file_add_chunk_delay,
         }));
 
     if !config.auth_disabled {
