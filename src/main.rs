@@ -5,7 +5,6 @@ mod file_change_data;
 mod file_change_tracker_actor;
 mod file_tracker_actor;
 mod serve_frontend;
-mod shutdown_actor;
 mod tokio_util;
 mod web_socket_actor;
 
@@ -20,7 +19,6 @@ use error::Result;
 use file_change_tracker_actor::FileChangeTrackerActorHandler;
 use file_tracker_actor::FileTrackerActorHandler;
 use serve_frontend::serve_frontend;
-use shutdown_actor::ShutdownActorHandler;
 use std::{
     panic, process,
     sync::{Arc, Weak},
@@ -79,8 +77,6 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
         process::exit(1);
     }));
 
-    let shutdown_handler = ShutdownActorHandler::new(join_set);
-
     let dotenvy_result = dotenvy::dotenv();
 
     let filter = EnvFilter::builder()
@@ -91,22 +87,15 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
 
     let _ = dotenvy_result.inspect_err(|e| tracing::warn!("Couldn't load .env: {}", e));
 
-    tracing::info!("Starting server");
-
     let config = config::Config::from_env()?;
 
     let listener = tokio::net::TcpListener::bind(&config.listen_address).await?;
 
-    let file_tracker_actor_handler = FileTrackerActorHandler::new(&shutdown_handler).await?;
+    let file_tracker_actor_handler = FileTrackerActorHandler::new(join_set)?;
 
-    let file_change_tracker_actor_handler = FileChangeTrackerActorHandler::new(
-        &shutdown_handler,
-        Arc::downgrade(&file_tracker_actor_handler),
-        config.rescrape_interval,
-        config.serve_dir.clone(),
-        config.file_extensions,
-    )
-    .await?;
+    ,
+        config.file_add_chunk_size,
+        config.file_add_chunk_delay, )?;
 
     let serve_dir_service = ServeDir::new(&config.serve_dir).fallback(get(axum_util::not_found));
 
@@ -121,9 +110,6 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
             file_add_chunk_size: config.file_add_chunk_size,
             file_add_chunk_delay: config.file_add_chunk_delay,
         }));
-
-    drop(file_tracker_actor_handler);
-    drop(file_change_tracker_actor_handler);
 
     if !config.auth_disabled {
         app = app.layer(middleware::from_fn(move |req, next| {
@@ -150,6 +136,16 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
                 .gzip(true)
                 .zstd(true),
         );
+
+    let _file_change_tracker_actor_handler = FileChangeTrackerActorHandler::new(
+        join_set,
+        file_tracker_actor_handler,
+        config.rescrape_interval,
+        config.serve_dir.clone(),
+        config.file_extensions,
+    )?;
+
+    tracing::info!("Starting server");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(tokio_util::shutdown_signal())

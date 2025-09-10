@@ -1,8 +1,13 @@
-use crate::file_change_data::{FileAddData, FileChangeData, FileRemoveData};
-use crate::shutdown_actor::ShutdownActorHandler;
-use crate::web_socket_actor::WebSocketActorHandler;
+use crate::{
+    error::Result,
+    file_change_data::{FileAddData, FileChangeData, FileRemoveData},
+    web_socket_actor::WebSocketActorHandler,
+};
 use std::{mem::take, sync::Arc};
-use tokio::{sync::mpsc, task::spawn_blocking};
+use tokio::{
+    sync::mpsc,
+    task::{JoinSet, spawn_blocking},
+};
 use tracing::instrument;
 
 #[derive(Debug)]
@@ -133,30 +138,23 @@ pub struct FileTrackerActorHandler {
 }
 
 impl FileTrackerActorHandler {
-    pub async fn new(
-        shutdown_actor_handler: &ShutdownActorHandler,
-    ) -> crate::error::Result<Arc<Self>> {
+    pub fn new(join_set: &mut JoinSet<()>) -> Result<Arc<Self>> {
         let (tx, rx) = mpsc::channel::<FileTrackerActorEvent>(8);
         let actor = FileTrackerActor::new(rx);
-        let join_handle = tokio::spawn(actor.run());
-        shutdown_actor_handler.add_join_handle(join_handle).await?;
+        join_set.spawn(actor.run());
 
         let result = Arc::from(Self { sender: tx });
-        shutdown_actor_handler.add_droppable(result.clone()).await?;
         Ok(result)
     }
 
-    pub async fn send_change(&self, change: FileChangeData) -> crate::error::Result<()> {
+    pub async fn send_change(&self, change: FileChangeData) -> Result<()> {
         self.sender
             .send(FileTrackerActorEvent::Change(change))
             .await?;
         Ok(())
     }
 
-    pub async fn add_web_socket_actor_handler(
-        &self,
-        handler: WebSocketActorHandler,
-    ) -> crate::error::Result<()> {
+    pub async fn add_web_socket_actor_handler(&self, handler: WebSocketActorHandler) -> Result<()> {
         self.sender
             .send(FileTrackerActorEvent::AddWebSocketActorHandler(handler))
             .await?;

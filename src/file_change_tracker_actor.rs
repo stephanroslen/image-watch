@@ -1,16 +1,9 @@
 use crate::file_tracker_actor::FileTrackerActorHandler;
-use crate::shutdown_actor::ShutdownActorHandler;
 use std::cmp::Reverse;
-use std::{
-    collections::HashSet,
-    mem::take,
-    path::PathBuf,
-    sync::{Arc, Weak},
-    time::Duration,
-};
+use std::{collections::HashSet, mem::take, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     sync::mpsc,
-    task::spawn_blocking,
+    task::{JoinSet, spawn_blocking},
     time::{Interval, MissedTickBehavior},
 };
 use tracing::instrument;
@@ -21,7 +14,7 @@ enum FileChangeTrackerActorEvent {}
 #[derive(Debug)]
 struct FileChangeTrackerActor {
     receiver: mpsc::Receiver<FileChangeTrackerActorEvent>,
-    file_tracker_actor_handler: Weak<FileTrackerActorHandler>,
+    file_tracker_actor_handler: Arc<FileTrackerActorHandler>,
     rescrape_timer: Interval,
     path_prefix: PathBuf,
     file_extensions: HashSet<String>,
@@ -31,7 +24,7 @@ struct FileChangeTrackerActor {
 impl FileChangeTrackerActor {
     fn new(
         receiver: mpsc::Receiver<FileChangeTrackerActorEvent>,
-        file_tracker_actor_handler: Weak<FileTrackerActorHandler>,
+        file_tracker_actor_handler: Arc<FileTrackerActorHandler>,
         rescrape_interval: Duration,
         path_prefix: PathBuf,
         file_extensions: Vec<String>,
@@ -105,11 +98,9 @@ impl FileChangeTrackerActor {
 
         if file_change_data.is_not_empty() {
             tracing::debug!("file change data: {:?}", &file_change_data);
-            if let Some(file_tracker_actor_handler) = self.file_tracker_actor_handler.upgrade() {
-                file_tracker_actor_handler
-                    .send_change(file_change_data)
-                    .await?;
-            }
+            self.file_tracker_actor_handler
+                .send_change(file_change_data)
+                .await?;
         }
 
         self.known_files = found;
@@ -141,9 +132,9 @@ pub struct FileChangeTrackerActorHandler {
 }
 
 impl FileChangeTrackerActorHandler {
-    pub async fn new(
-        shutdown_actor_handler: &ShutdownActorHandler,
-        file_tracker_actor_handler: Weak<FileTrackerActorHandler>,
+    pub fn new(
+        join_set: &mut JoinSet<()>,
+        file_tracker_actor_handler: Arc<FileTrackerActorHandler>,
         rescrape_interval: Duration,
         path_prefix: PathBuf,
         file_extensions: Vec<String>,
@@ -156,12 +147,9 @@ impl FileChangeTrackerActorHandler {
             path_prefix,
             file_extensions,
         );
-        shutdown_actor_handler
-            .add_join_handle(tokio::spawn(actor.run()))
-            .await?;
+        join_set.spawn(actor.run());
 
         let result = Arc::from(Self { _sender: tx });
-        shutdown_actor_handler.add_droppable(result.clone()).await?;
         Ok(result)
     }
 }
