@@ -1,4 +1,5 @@
 use std::{fmt::Debug, sync::Arc};
+use tokio::task::JoinSet;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::instrument;
 
@@ -6,7 +7,6 @@ use tracing::instrument;
 enum ShutdownActorEvent {
     AddJoinHandle(JoinHandle<()>),
     AddDroppable(Arc<dyn Send + Sync + Debug>),
-    Shutdown,
 }
 
 #[derive(Debug)]
@@ -35,7 +35,15 @@ impl ShutdownActor {
                 msg = self.receiver.recv() => {
                     match msg {
                         None => {
-                            panic!("Expected channel not to close before shutdown event!");
+                            for droppable in self.droppables.drain(..) {
+                                tracing::debug!("Dropping {:?}", droppable);
+                            }
+                            for join_handle in self.join_handles.drain(..) {
+                                tracing::debug!("Joining {:?}", join_handle);
+                                join_handle.await.expect("Expected join handle to complete");
+                                tracing::debug!("Joined");
+                            }
+                            break;
                         },
                         Some(msg) => {
                             match msg {
@@ -47,17 +55,6 @@ impl ShutdownActor {
                                     tracing::debug!("Added droppable {:?}", &droppable);
                                     self.droppables.push(droppable);
                                 },
-                                ShutdownActorEvent::Shutdown => {
-                                    for droppable in self.droppables.drain(..) {
-                                        tracing::debug!("Dropping {:?}", droppable);
-                                    }
-                                    for join_handle in self.join_handles.drain(..) {
-                                        tracing::debug!("Joining {:?}", join_handle);
-                                        join_handle.await.expect("Expected join handle to complete");
-                                        tracing::debug!("Joined");
-                                    }
-                                    break;
-                                }
                             }
                         }
                     }
@@ -71,32 +68,16 @@ impl ShutdownActor {
 #[derive(Debug)]
 pub struct ShutdownActorHandler {
     sender: mpsc::Sender<ShutdownActorEvent>,
-    own_join_handle: JoinHandle<()>,
 }
 
 impl ShutdownActorHandler {
-    pub fn new() -> Self {
+    pub fn new(join_set: &mut JoinSet<()>) -> Self {
         let (tx, rx) = mpsc::channel::<ShutdownActorEvent>(8);
         let actor = ShutdownActor::new(rx);
 
-        let own_join_handle = tokio::spawn(actor.run());
+        join_set.spawn(actor.run());
 
-        Self {
-            sender: tx,
-            own_join_handle,
-        }
-    }
-
-    #[instrument]
-    pub async fn shutdown(self) {
-        self.sender
-            .send(ShutdownActorEvent::Shutdown)
-            .await
-            .expect("Expected to be able to send shutdown event to shutdown actor");
-        self.own_join_handle
-            .await
-            .expect("Expected to be able to join shutdown actor");
-        tracing::debug!("Shutdown actor stopped");
+        Self { sender: tx }
     }
 
     pub async fn add_join_handle(&self, join_handle: JoinHandle<()>) -> crate::error::Result<()> {

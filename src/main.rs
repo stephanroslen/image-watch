@@ -26,6 +26,7 @@ use std::{
     sync::{Arc, Weak},
     time::Duration,
 };
+use tokio::task::JoinSet;
 use tower_http::{compression::CompressionLayer, services::fs::ServeDir, trace, trace::TraceLayer};
 use tracing::{Level, instrument};
 use web_socket_actor::WebSocketActorHandler;
@@ -59,22 +60,25 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WsState>>) -> 
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let result = image_watch().await;
+    let mut join_set = JoinSet::new();
+    let result = image_watch(&mut join_set).await;
 
     if let Err(e) = &result {
         eprintln!("Error: {}", e);
     }
 
-    result
+    join_set.join_all().await;
+
+    Ok(())
 }
 
-async fn image_watch() -> Result<()> {
+async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
     panic::set_hook(Box::new(|info| {
         tracing::error!("Task panic: {}", info);
         process::exit(1);
     }));
 
-    let shutdown_handler = ShutdownActorHandler::new();
+    let shutdown_handler = ShutdownActorHandler::new(join_set);
 
     dotenvy::dotenv()?;
 
@@ -143,8 +147,6 @@ async fn image_watch() -> Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(tokio_util::shutdown_signal())
         .await?;
-
-    shutdown_handler.shutdown().await;
 
     tracing::info!("Server stopped");
 
