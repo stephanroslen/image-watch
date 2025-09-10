@@ -29,6 +29,8 @@
   let reconnectTimeout = 1000;
   let maxReconnectTimeout = 10000;
 
+  let connectScheduled = false;
+
   function connect() {
     const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
@@ -68,7 +70,12 @@
     });
 
     function scheduleReconnect() {
+      if (connectScheduled) return;
+
+      connectScheduled = true;
+
       setTimeout(() => {
+        connectScheduled = false;
         connect();
       }, reconnectTimeout);
 
