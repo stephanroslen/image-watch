@@ -143,7 +143,19 @@ impl FileTrackerActor {
                 }
             }
         }
+
+        self.shutdown_web_socket_actor_handlers().await;
+
         tracing::debug!("actor stopped");
+    }
+
+    async fn shutdown_web_socket_actor_handlers(mut self) {
+        for handler in self.web_socket_actor_handlers.drain(..) {
+            let join_handle = handler.join_handle();
+            join_handle
+                .await
+                .expect("Expected web socket actor to be joinable");
+        }
     }
 }
 
