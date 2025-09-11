@@ -1,7 +1,8 @@
+use crate::web_socket_actor::WebSocketActorEvent;
 use crate::{
     error::Result,
     file_change_data::{FileAddData, FileChangeData, FileRemoveData},
-    web_socket_actor::WebSocketActorHandler,
+    web_socket_actor::WebSocketActor,
 };
 use axum::extract::ws::WebSocket;
 use std::time::Duration;
@@ -11,6 +12,18 @@ use tokio::{
     task::{JoinSet, spawn_blocking},
 };
 use tracing::instrument;
+
+#[derive(Debug)]
+struct WebSocketActorSenderAndJoinHandle {
+    sender: mpsc::Sender<WebSocketActorEvent>,
+    join_handle: tokio::task::JoinHandle<()>,
+}
+
+impl WebSocketActorSenderAndJoinHandle {
+    fn extract_join_handle(self) -> tokio::task::JoinHandle<()> {
+        self.join_handle
+    }
+}
 
 #[derive(Debug)]
 enum FileTrackerActorEvent {
@@ -24,7 +37,7 @@ struct FileTrackerActor {
     file_add_chunk_size: usize,
     file_add_chunk_delay: Duration,
     baseline: FileAddData,
-    web_socket_actor_handlers: Vec<WebSocketActorHandler>,
+    web_socket_actor_senders_and_join_handles: Vec<WebSocketActorSenderAndJoinHandle>,
 }
 
 impl FileTrackerActor {
@@ -34,14 +47,14 @@ impl FileTrackerActor {
         file_add_chunk_delay: Duration,
     ) -> Self {
         let baseline = FileAddData::new();
-        let web_socket_actor_handlers = Vec::new();
+        let web_socket_actor_senders_and_join_handles = Vec::new();
 
         Self {
             receiver,
             file_add_chunk_size,
             file_add_chunk_delay,
             baseline,
-            web_socket_actor_handlers,
+            web_socket_actor_senders_and_join_handles,
         }
     }
 
@@ -50,24 +63,26 @@ impl FileTrackerActor {
         tracing::info!("known files changed: {:?}", &change);
 
         {
-            let mut new_handlers = Vec::new();
+            let mut survivors = Vec::new();
 
-            for handler in self.web_socket_actor_handlers.drain(..) {
-                let result = handler.send_change(change.clone()).await;
+            for sender_and_join_handle in self.web_socket_actor_senders_and_join_handles.drain(..) {
+                let result =
+                    WebSocketActor::send_change(&sender_and_join_handle.sender, change.clone())
+                        .await;
                 match result {
                     Ok(_) => {
-                        new_handlers.push(handler);
+                        survivors.push(sender_and_join_handle);
                     }
                     Err(_) => {
-                        handler
-                            .join_handle()
+                        sender_and_join_handle
+                            .extract_join_handle()
                             .await
                             .expect("Expected handle to be joinable");
                     }
                 }
             }
 
-            self.web_socket_actor_handlers = new_handlers;
+            self.web_socket_actor_senders_and_join_handles = survivors;
         }
 
         let baseline = take(&mut self.baseline);
@@ -118,24 +133,33 @@ impl FileTrackerActor {
                 }
                 FileTrackerActorEvent::AddWebSocket(ws) => {
                     tracing::debug!("adding web socket");
-                    let handler = WebSocketActorHandler::new(
+                    let (sender, receiver) = mpsc::channel::<_>(8);
+                    let ws_actor = WebSocketActor::new(
                         ws,
                         self.file_add_chunk_size,
                         self.file_add_chunk_delay,
                     );
-                    let result = handler
-                        .send_change(FileChangeData {
+                    let join_handle = tokio::task::spawn(ws_actor.run(receiver));
+                    let sender_and_join_handle = WebSocketActorSenderAndJoinHandle {
+                        sender,
+                        join_handle,
+                    };
+                    let result = WebSocketActor::send_change(
+                        &sender_and_join_handle.sender,
+                        FileChangeData {
                             removed: FileRemoveData(Vec::new()),
                             added: self.baseline.clone(),
-                        })
-                        .await;
+                        },
+                    )
+                    .await;
                     match result {
                         Ok(_) => {
-                            self.web_socket_actor_handlers.push(handler);
+                            self.web_socket_actor_senders_and_join_handles
+                                .push(sender_and_join_handle);
                         }
                         Err(_) => {
-                            handler
-                                .join_handle()
+                            sender_and_join_handle
+                                .extract_join_handle()
                                 .await
                                 .expect("Expected handle to be joinable");
                         }
@@ -150,8 +174,8 @@ impl FileTrackerActor {
     }
 
     async fn shutdown_web_socket_actor_handlers(mut self) {
-        for handler in self.web_socket_actor_handlers.drain(..) {
-            let join_handle = handler.join_handle();
+        for sender_and_join_handle in self.web_socket_actor_senders_and_join_handles.drain(..) {
+            let join_handle = sender_and_join_handle.extract_join_handle();
             join_handle
                 .await
                 .expect("Expected web socket actor to be joinable");
