@@ -80,8 +80,7 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
 
     let (file_tracker_actor_sender, file_tracker_actor_receiver) = mpsc::channel(8);
 
-    let file_tracker_actor =
-        FileTrackerActor::new(config.file_add_chunk_size, config.file_add_chunk_delay);
+    let file_tracker_actor = FileTrackerActor::new();
 
     join_set.spawn(file_tracker_actor.run(file_tracker_actor_receiver));
 

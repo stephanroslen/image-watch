@@ -6,7 +6,6 @@ use crate::{
 };
 use axum::extract::ws::WebSocket;
 use std::mem::take;
-use std::time::Duration;
 use tokio::{sync::mpsc, task::spawn_blocking};
 use tracing::instrument;
 
@@ -30,20 +29,16 @@ pub enum FileTrackerActorEvent {
 
 #[derive(Debug)]
 pub struct FileTrackerActor {
-    file_add_chunk_size: usize,
-    file_add_chunk_delay: Duration,
     baseline: FileAddData,
     web_socket_actor_senders_and_join_handles: Vec<WebSocketActorSenderAndJoinHandle>,
 }
 
 impl FileTrackerActor {
-    pub fn new(file_add_chunk_size: usize, file_add_chunk_delay: Duration) -> Self {
+    pub fn new() -> Self {
         let baseline = FileAddData::new();
         let web_socket_actor_senders_and_join_handles = Vec::new();
 
         Self {
-            file_add_chunk_size,
-            file_add_chunk_delay,
             baseline,
             web_socket_actor_senders_and_join_handles,
         }
@@ -125,11 +120,7 @@ impl FileTrackerActor {
                 FileTrackerActorEvent::AddWebSocket(ws) => {
                     tracing::debug!("adding web socket");
                     let (sender, receiver) = mpsc::channel::<_>(8);
-                    let ws_actor = WebSocketActor::new(
-                        ws,
-                        self.file_add_chunk_size,
-                        self.file_add_chunk_delay,
-                    );
+                    let ws_actor = WebSocketActor::new(ws);
                     let join_handle = tokio::task::spawn(ws_actor.run(receiver));
                     let sender_and_join_handle = WebSocketActorSenderAndJoinHandle {
                         sender,

@@ -10,8 +10,6 @@ pub struct Config {
     pub auth_disabled: bool,
     pub auth_pass_argon2: String,
     pub auth_user: String,
-    pub file_add_chunk_size: usize,
-    pub file_add_chunk_delay: std::time::Duration,
     pub file_extensions: Vec<String>,
     pub rescrape_interval: std::time::Duration,
     pub serve_dir: PathBuf,
@@ -34,14 +32,6 @@ impl Config {
             "".into()
         };
 
-        let raw_file_add_chunk_size = env::var("FILE_ADD_CHUNK_SIZE").unwrap_or("64".to_string());
-        let file_add_chunk_size = raw_file_add_chunk_size.parse::<usize>()?;
-
-        let raw_file_add_chunk_delay =
-            env::var("FILE_ADD_CHUNK_DELAY_MILLIS").unwrap_or("200".to_string());
-        let file_add_chunk_delay =
-            std::time::Duration::from_millis(raw_file_add_chunk_delay.parse::<u64>()?);
-
         let raw_file_extensions = env::var("FILE_EXTENSIONS").unwrap_or("jpg,jpeg".to_string());
         let file_extensions = raw_file_extensions
             .split(',')
@@ -62,8 +52,6 @@ impl Config {
             auth_disabled,
             auth_pass_argon2,
             auth_user,
-            file_add_chunk_size,
-            file_add_chunk_delay,
             file_extensions,
             rescrape_interval,
             serve_dir,
