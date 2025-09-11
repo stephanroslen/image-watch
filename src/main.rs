@@ -16,7 +16,7 @@ use axum::{
     routing::get,
 };
 use error::Result;
-use file_change_tracker_actor::FileChangeTrackerActorHandler;
+use file_change_tracker_actor::FileChangeTrackerActor;
 use file_tracker_actor::{FileTrackerActor, FileTrackerActorEvent};
 use serve_frontend::serve_frontend;
 use std::{panic, process, sync::Arc};
@@ -123,13 +123,16 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
                 .zstd(true),
         );
 
-    let _file_change_tracker_actor_handler = FileChangeTrackerActorHandler::new(
-        join_set,
+    let (_file_change_tracker_actor_sender, file_change_tracker_actor_receiver) = mpsc::channel(8);
+
+    let file_change_tracker_actor_handler = FileChangeTrackerActor::new(
         file_tracker_actor_sender,
         config.rescrape_interval,
         config.serve_dir.clone(),
         config.file_extensions,
-    )?;
+    );
+
+    join_set.spawn(file_change_tracker_actor_handler.run(file_change_tracker_actor_receiver));
 
     tracing::info!("Starting server");
 

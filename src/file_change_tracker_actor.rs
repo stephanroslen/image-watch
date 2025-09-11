@@ -1,19 +1,15 @@
 use crate::file_tracker_actor::{FileTrackerActor, FileTrackerActorEvent};
 use std::cmp::Reverse;
-use std::{collections::HashSet, mem::take, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashSet, mem::take, path::PathBuf, time::Duration};
 use tokio::{
     sync::mpsc,
-    task::{JoinSet, spawn_blocking},
+    task::spawn_blocking,
     time::{Interval, MissedTickBehavior},
 };
 use tracing::instrument;
 
 #[derive(Debug)]
-enum FileChangeTrackerActorEvent {}
-
-#[derive(Debug)]
-struct FileChangeTrackerActor {
-    receiver: mpsc::Receiver<FileChangeTrackerActorEvent>,
+pub struct FileChangeTrackerActor {
     file_tracker_actor_sender: mpsc::Sender<FileTrackerActorEvent>,
     rescrape_timer: Interval,
     path_prefix: PathBuf,
@@ -22,8 +18,7 @@ struct FileChangeTrackerActor {
 }
 
 impl FileChangeTrackerActor {
-    fn new(
-        receiver: mpsc::Receiver<FileChangeTrackerActorEvent>,
+    pub fn new(
         file_tracker_actor_sender: mpsc::Sender<FileTrackerActorEvent>,
         rescrape_interval: Duration,
         path_prefix: PathBuf,
@@ -36,7 +31,6 @@ impl FileChangeTrackerActor {
         let known_files = HashSet::new();
 
         Self {
-            receiver,
             file_tracker_actor_sender,
             rescrape_timer,
             path_prefix,
@@ -108,11 +102,11 @@ impl FileChangeTrackerActor {
     }
 
     #[instrument]
-    async fn run(mut self) {
+    pub async fn run(mut self, mut receiver: mpsc::Receiver<()>) {
         tracing::debug!("actor started");
         loop {
             tokio::select! {
-                msg = self.receiver.recv() => match msg {
+                msg = receiver.recv() => match msg {
                     Some(_) => {},
                     None => break,
                 },
@@ -122,33 +116,5 @@ impl FileChangeTrackerActor {
             }
         }
         tracing::debug!("actor stopped");
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct FileChangeTrackerActorHandler {
-    _sender: mpsc::Sender<FileChangeTrackerActorEvent>,
-}
-
-impl FileChangeTrackerActorHandler {
-    pub fn new(
-        join_set: &mut JoinSet<()>,
-        file_tracker_actor_sender: mpsc::Sender<FileTrackerActorEvent>,
-        rescrape_interval: Duration,
-        path_prefix: PathBuf,
-        file_extensions: Vec<String>,
-    ) -> crate::error::Result<Arc<Self>> {
-        let (tx, rx) = mpsc::channel::<FileChangeTrackerActorEvent>(8);
-        let actor = FileChangeTrackerActor::new(
-            rx,
-            file_tracker_actor_sender,
-            rescrape_interval,
-            path_prefix,
-            file_extensions,
-        );
-        join_set.spawn(actor.run());
-
-        let result = Arc::from(Self { _sender: tx });
-        Ok(result)
     }
 }
