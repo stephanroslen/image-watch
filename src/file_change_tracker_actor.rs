@@ -1,4 +1,4 @@
-use crate::file_tracker_actor::FileTrackerActorHandler;
+use crate::file_tracker_actor::{FileTrackerActor, FileTrackerActorEvent};
 use std::cmp::Reverse;
 use std::{collections::HashSet, mem::take, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
@@ -14,7 +14,7 @@ enum FileChangeTrackerActorEvent {}
 #[derive(Debug)]
 struct FileChangeTrackerActor {
     receiver: mpsc::Receiver<FileChangeTrackerActorEvent>,
-    file_tracker_actor_handler: Arc<FileTrackerActorHandler>,
+    file_tracker_actor_sender: mpsc::Sender<FileTrackerActorEvent>,
     rescrape_timer: Interval,
     path_prefix: PathBuf,
     file_extensions: HashSet<String>,
@@ -24,7 +24,7 @@ struct FileChangeTrackerActor {
 impl FileChangeTrackerActor {
     fn new(
         receiver: mpsc::Receiver<FileChangeTrackerActorEvent>,
-        file_tracker_actor_handler: Arc<FileTrackerActorHandler>,
+        file_tracker_actor_sender: mpsc::Sender<FileTrackerActorEvent>,
         rescrape_interval: Duration,
         path_prefix: PathBuf,
         file_extensions: Vec<String>,
@@ -37,7 +37,7 @@ impl FileChangeTrackerActor {
 
         Self {
             receiver,
-            file_tracker_actor_handler,
+            file_tracker_actor_sender,
             rescrape_timer,
             path_prefix,
             file_extensions,
@@ -98,8 +98,7 @@ impl FileChangeTrackerActor {
 
         if file_change_data.is_not_empty() {
             tracing::debug!("file change data: {:?}", &file_change_data);
-            self.file_tracker_actor_handler
-                .send_change(file_change_data)
+            FileTrackerActor::send_change(&self.file_tracker_actor_sender, file_change_data)
                 .await?;
         }
 
@@ -134,7 +133,7 @@ pub struct FileChangeTrackerActorHandler {
 impl FileChangeTrackerActorHandler {
     pub fn new(
         join_set: &mut JoinSet<()>,
-        file_tracker_actor_handler: Arc<FileTrackerActorHandler>,
+        file_tracker_actor_sender: mpsc::Sender<FileTrackerActorEvent>,
         rescrape_interval: Duration,
         path_prefix: PathBuf,
         file_extensions: Vec<String>,
@@ -142,7 +141,7 @@ impl FileChangeTrackerActorHandler {
         let (tx, rx) = mpsc::channel::<FileChangeTrackerActorEvent>(8);
         let actor = FileChangeTrackerActor::new(
             rx,
-            file_tracker_actor_handler,
+            file_tracker_actor_sender,
             rescrape_interval,
             path_prefix,
             file_extensions,

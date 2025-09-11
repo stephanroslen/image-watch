@@ -17,31 +17,27 @@ use axum::{
 };
 use error::Result;
 use file_change_tracker_actor::FileChangeTrackerActorHandler;
-use file_tracker_actor::FileTrackerActorHandler;
+use file_tracker_actor::{FileTrackerActor, FileTrackerActorEvent};
 use serve_frontend::serve_frontend;
-use std::{
-    panic, process,
-    sync::{Arc, Weak},
-};
-use tokio::task::JoinSet;
+use std::{panic, process, sync::Arc};
+use tokio::{sync::mpsc, task::JoinSet};
 use tower_http::{compression::CompressionLayer, services::fs::ServeDir, trace, trace::TraceLayer};
 use tracing::{Level, instrument};
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 #[derive(Debug)]
 struct WsState {
-    file_tracker_actor_handler: Weak<FileTrackerActorHandler>,
+    file_tracker_actor_sender: mpsc::WeakSender<FileTrackerActorEvent>,
 }
 
 #[instrument]
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WsState>>) -> impl IntoResponse {
     ws.on_upgrade(async move |socket| {
         tracing::debug!("on_upgrade");
-        let file_tracker_actor_handler = state.file_tracker_actor_handler.upgrade();
-        if let Some(file_tracker_actor_handler) = file_tracker_actor_handler {
-            tracing::debug!("got file tracker actor handler");
-            file_tracker_actor_handler
-                .add_web_socket(socket)
+        let file_tracker_actor_sender = state.file_tracker_actor_sender.upgrade();
+        if let Some(file_tracker_actor_sender) = file_tracker_actor_sender {
+            tracing::debug!("got file tracker actor sender");
+            FileTrackerActor::add_web_socket(&file_tracker_actor_sender, socket)
                 .await
                 .expect("Expected to be able to add web socket");
         }
@@ -82,11 +78,12 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&config.listen_address).await?;
 
-    let file_tracker_actor_handler = FileTrackerActorHandler::new(
-        join_set,
-        config.file_add_chunk_size,
-        config.file_add_chunk_delay,
-    )?;
+    let (file_tracker_actor_sender, file_tracker_actor_receiver) = mpsc::channel(8);
+
+    let file_tracker_actor =
+        FileTrackerActor::new(config.file_add_chunk_size, config.file_add_chunk_delay);
+
+    join_set.spawn(file_tracker_actor.run(file_tracker_actor_receiver));
 
     let serve_dir_service = ServeDir::new(&config.serve_dir).fallback(get(axum_util::not_found));
 
@@ -97,7 +94,7 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
         .nest_service("/data", serve_dir_service)
         .fallback(get(axum_util::not_found))
         .with_state(Arc::new(WsState {
-            file_tracker_actor_handler: Arc::downgrade(&file_tracker_actor_handler),
+            file_tracker_actor_sender: file_tracker_actor_sender.downgrade(),
         }));
 
     if !config.auth_disabled {
@@ -128,7 +125,7 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
 
     let _file_change_tracker_actor_handler = FileChangeTrackerActorHandler::new(
         join_set,
-        file_tracker_actor_handler,
+        file_tracker_actor_sender,
         config.rescrape_interval,
         config.serve_dir.clone(),
         config.file_extensions,
