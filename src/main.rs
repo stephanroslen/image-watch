@@ -93,7 +93,13 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
 
     let weak_authentication_actor_sender = autentication_actor_sender.downgrade();
 
-    let authentication_actor = AuthenticationActor::new(config.auth_user, config.auth_pass_argon2);
+    let authentication_actor = AuthenticationActor::new(
+        config.auth_user,
+        config.auth_pass_argon2,
+        config.auth_token_cleanup_interval,
+        config.auth_token_ttl,
+        config.auth_token_max_per_user,
+    );
 
     join_set.spawn(authentication_actor.run(authentication_actor_receiver));
 
@@ -150,7 +156,7 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
         .route("/backend/ws", get(ws_handler))
         .route("/backend/login", post(login_handler))
         .route("/backend/logout", post(logout_handler))
-        .route("/backend/check_auth", get(empty_response))
+        .route("/backend/keepalive", get(empty_response))
         .nest_service("/backend/data", serve_dir_service)
         .fallback(get(axum_util::not_found))
         .with_state(Arc::new(WsState {

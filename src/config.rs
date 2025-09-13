@@ -9,6 +9,9 @@ use std::{
 pub struct Config {
     pub auth_pass_argon2: String,
     pub auth_user: String,
+    pub auth_token_cleanup_interval: std::time::Duration,
+    pub auth_token_ttl: std::time::Duration,
+    pub auth_token_max_per_user: usize,
     pub file_extensions: Vec<String>,
     pub rescrape_interval: std::time::Duration,
     pub serve_dir: PathBuf,
@@ -26,6 +29,18 @@ impl Config {
             .map(|s| s.to_string())
             .collect();
 
+        let auth_token_cleanup_interval =
+            env::var("AUTH_TOKEN_CLEANUP_INTERVAL_MILLIS").unwrap_or("1000".to_string());
+        let auth_token_cleanup_interval =
+            std::time::Duration::from_millis(auth_token_cleanup_interval.parse::<u64>()?);
+
+        let auth_token_ttl = env::var("AUTH_TOKEN_TTL_SECS").unwrap_or("3600".to_string());
+        let auth_token_ttl = std::time::Duration::from_secs(auth_token_ttl.parse::<u64>()?);
+
+        let auth_token_max_per_user =
+            env::var("AUTH_TOKEN_MAX_PER_USER").unwrap_or("16".to_string());
+        let auth_token_max_per_user = auth_token_max_per_user.parse::<usize>()?;
+
         let raw_rescrape_interval =
             env::var("RESCRAPE_INTERVAL_MILLIS").unwrap_or("1000".to_string());
         let rescrape_interval =
@@ -39,6 +54,9 @@ impl Config {
         let config = Self {
             auth_pass_argon2,
             auth_user,
+            auth_token_cleanup_interval,
+            auth_token_ttl,
+            auth_token_max_per_user,
             file_extensions,
             rescrape_interval,
             serve_dir,
