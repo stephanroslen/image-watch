@@ -6,11 +6,20 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
-use tokio::sync::mpsc;
+use tokio::{
+    sync::mpsc,
+    time::{Interval, MissedTickBehavior},
+};
 use tracing::instrument;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Token(pub String);
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct Username(String);
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
+struct Deadline(std::time::Instant);
 
 impl Token {
     pub fn generate() -> Self {
@@ -42,18 +51,36 @@ pub enum AuthenticationActorEvent {
 
 #[derive(Debug)]
 pub struct AuthenticationActor {
-    tokens: std::collections::HashSet<Token>,
+    tokens: std::collections::HashMap<Token, Username>,
+    reverse: std::collections::HashMap<Username, Vec<(Token, Deadline)>>,
     username: String,
     password_argon2: String,
+    cleanup_timer: Interval,
+    auth_token_ttl: std::time::Duration,
+    auth_token_max_per_user: usize,
 }
 
 impl AuthenticationActor {
-    pub fn new(username: String, password_argon2: String) -> Self {
-        let tokens = std::collections::HashSet::new();
+    pub fn new(
+        username: String,
+        password_argon2: String,
+        auth_token_cleanup_interval: std::time::Duration,
+        auth_token_ttl: std::time::Duration,
+        auth_token_max_per_user: usize,
+    ) -> Self {
+        let tokens = std::collections::HashMap::new();
+        let reverse = std::collections::HashMap::new();
+        let mut cleanup_timer = tokio::time::interval(auth_token_cleanup_interval);
+        // continue with intended interval even if the timer is missed
+        cleanup_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
         Self {
             tokens,
+            reverse,
             username,
             password_argon2,
+            cleanup_timer,
+            auth_token_ttl,
+            auth_token_max_per_user,
         }
     }
 
@@ -71,7 +98,7 @@ impl AuthenticationActor {
             return true;
         }
         if let Some(token) = token {
-            return self.tokens.contains(&token);
+            return self.tokens.contains_key(&token);
         }
         false
     }
@@ -86,7 +113,12 @@ impl AuthenticationActor {
                 .unwrap_or(false)
         {
             let token = Token::generate();
-            self.tokens.insert(token.clone());
+            self.tokens
+                .insert(token.clone(), Username(username.clone()));
+            self.reverse.entry(Username(username)).or_default().push((
+                token.clone(),
+                Deadline(std::time::Instant::now() + self.auth_token_ttl),
+            ));
             Some(token)
         } else {
             None
@@ -97,40 +129,73 @@ impl AuthenticationActor {
         self.tokens.remove(&token);
     }
 
+    async fn cleanup(&mut self) {
+        let now = std::time::Instant::now();
+
+        for (_, tokens) in self.reverse.iter_mut() {
+            let mut survivors = Vec::new();
+            for (token, deadline) in tokens.drain(..) {
+                if deadline.0 < now {
+                    self.tokens.remove(&token);
+                } else {
+                    survivors.push((token, deadline));
+                }
+            }
+            if survivors.len() >= self.auth_token_max_per_user {
+                survivors.sort_by_key(|(_, deadline)| deadline.0);
+                for (token, _) in survivors.drain(self.auth_token_max_per_user..) {
+                    self.tokens.remove(&token);
+                }
+            }
+            *tokens = survivors;
+        }
+
+        self.reverse.retain(|_, tokens| !tokens.is_empty());
+    }
+
     #[instrument]
     pub async fn run(mut self, mut receiver: mpsc::Receiver<AuthenticationActorEvent>) {
         tracing::debug!("actor started");
-        while let Some(msg) = receiver.recv().await {
-            match msg {
-                AuthenticationActorEvent::AuthenticateRequest {
-                    token,
-                    uri,
-                    response_sender: response,
-                } => {
-                    let _ = response
-                        .send(self.authenticate_request(token, uri).await)
-                        .inspect_err(|e| {
-                            tracing::error!(
-                                "Error responding to AuthenticatorEvent::VerifyToken: {:?}",
-                                e
-                            )
-                        });
-                }
-                AuthenticationActorEvent::GetToken {
-                    credentials,
-                    response_sender: response,
-                } => {
-                    let _ = response
-                        .send(self.authenticate(credentials).await)
-                        .inspect_err(|e| {
-                            tracing::error!(
-                                "Error responding to AuthenticatorEvent::Authenticate: {:?}",
-                                e
-                            )
-                        });
-                }
-                AuthenticationActorEvent::RevokeToken { token } => {
-                    self.remove_token(token).await;
+        loop {
+            tokio::select! {
+                msg = receiver.recv() => match msg {
+                    Some(msg) => {
+                        match msg {
+                            AuthenticationActorEvent::AuthenticateRequest {
+                                token,
+                                uri,
+                                response_sender: response,
+                            } => {
+                                let _ = response
+                                    .send(self.authenticate_request(token, uri).await)
+                                    .inspect_err(|e| {
+                                        tracing::error!(
+                                            "Error responding to AuthenticatorEvent::VerifyToken: {:?}",
+                                            e
+                                        )
+                                    });
+                            }
+                            AuthenticationActorEvent::GetToken {
+                                credentials,
+                                response_sender: response,
+                            } => {
+                                let _ = response
+                                    .send(self.authenticate(credentials).await)
+                                    .inspect_err(|e| {
+                                        tracing::error!(
+                                            "Error responding to AuthenticatorEvent::Authenticate: {:?}",
+                                            e
+                                        )
+                                    });
+                            }
+                            AuthenticationActorEvent::RevokeToken { token } => {
+                                self.remove_token(token).await;
+                            }
+                        }},
+                    None => break,
+                },
+                _ = self.cleanup_timer.tick() => {
+                    self.cleanup().await;
                 }
             }
         }
