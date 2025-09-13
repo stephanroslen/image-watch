@@ -1,142 +1,56 @@
 <script>
-  import device from "current-device";
-  import { fade } from "svelte/transition";
+  import AuthRequired from "./components/AuthRequired.svelte";
+  import Navbar from "./components/Navbar.svelte";
+  import Images from "./pages/Images.svelte";
+  import Login from "./pages/Login.svelte";
+  import Route from "./components/router/Route.svelte";
+  import Router from "./components/router/Router.svelte";
+  import UnauthRequired from "./components/UnauthRequired.svelte";
 
-  let images = $state([]);
-  let connected = $state(false);
+  import { setContext } from "svelte";
 
-  let dummy_images = [];
+  let currentRoute = $state(window.location.pathname);
 
-  let type = device.type;
-  let orientation = $state(device.orientation);
-  device.onChangeOrientation(
-    (newOrientation) => (orientation = newOrientation),
-  );
+  let authToken = $state(localStorage.getItem("auth_token"));
 
-  let grid_columns = $derived(
-    type === "mobile"
-      ? orientation === "landscape"
-        ? 2
-        : 1
-      : type === "tablet"
-        ? orientation === "landscape"
-          ? 3
-          : 2
-        : 3,
-  );
+  setContext("currentRoute", () => currentRoute);
 
-  let ws;
-  let reconnectTimeout = 1000;
-  let maxReconnectTimeout = 10000;
-
-  let connectScheduled = false;
-
-  function connect() {
-    const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
-    ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
-
-    ws.addEventListener("open", () => {
-      connected = true;
-      dummy_images = [];
-      reconnectTimeout = 1000;
-      console.log("WebSocket connected");
-    });
-
-    ws.addEventListener("close", () => {
-      connected = false;
-      console.log("WebSocket closed, reconnecting...");
-      scheduleReconnect();
-    });
-
-    ws.addEventListener("error", (err) => {
-      connected = false;
-      console.log("WebSocket error", err);
-      scheduleReconnect();
-    });
-
-    ws.addEventListener("message", (event) => {
-      const data = JSON.parse(event.data);
-
-      if (data.removed) {
-        const removedSet = new Set(data.removed);
-        dummy_images = dummy_images.filter((img) => !removedSet.has(img.name));
-      }
-
-      for (const [name, timestamp] of data.added ?? []) {
-        insertSorted({ name, timestamp });
-      }
-
-      images = dummy_images;
-    });
-
-    function scheduleReconnect() {
-      if (connectScheduled) return;
-
-      connectScheduled = true;
-
-      setTimeout(() => {
-        connectScheduled = false;
-        connect();
-      }, reconnectTimeout);
-
-      reconnectTimeout = Math.min(reconnectTimeout * 2, maxReconnectTimeout);
-    }
-
-    function insertSorted(img) {
-      let i = 0;
-      while (
-        i < dummy_images.length &&
-        dummy_images[i].timestamp > img.timestamp
-      )
-        i++;
-      dummy_images = [
-        ...dummy_images.slice(0, i),
-        img,
-        ...dummy_images.slice(i),
-      ];
-    }
+  function navigate(path) {
+    history.pushState({}, "", path);
+    currentRoute = path;
   }
 
-  connect();
+  function removeAuthToken() {
+    authToken = null;
+    localStorage.removeItem("auth_token");
+  }
+
+  function setAuthToken(token) {
+    authToken = token;
+    localStorage.setItem("auth_token", token);
+    navigate("/images");
+  }
+
+  setContext("setAuthToken", setAuthToken);
+  setContext("removeAuthToken", removeAuthToken);
+  setContext("authToken", () => authToken);
+  setContext("navigate", navigate);
 </script>
 
 <main>
-  {#if !connected}
-    <div class="fixed top-0 right-0 m-4 z-50">
-      <div role="alert" class="alert alert-error">
-        <span class="loading loading-spinner loading-xs"></span>
-        <span>WebSocket connection lost - reconnecting!</span>
-      </div>
-    </div>
-  {/if}
-
-  <div class="p-4">
-    <h1 class="text-3xl font-bold mb-8">Image Watch</h1>
-
-    <div
-      class="w-[95%] mx-auto grid gap-4 bg-neutral-content text-neutral-content rounded-xl p-4 min-h-[calc(100vh-180px)] place-content-start"
-      class:grid-cols-1={grid_columns === 1}
-      class:grid-cols-2={grid_columns === 2}
-      class:grid-cols-3={grid_columns === 3}
-    >
-      {#each images as img (img.name)}
-        <div
-          class="rounded-xl"
-          in:fade={{ duration: 300 }}
-          out:fade={{ duration: 100 }}
-        >
-          <div class="tooltip tooltip-info tooltip-bottom" data-tip={img.name}>
-            <img
-              src={`/data/${img.name}`}
-              alt={img.name}
-              class="w-full h-full transition duration-300"
-              loading="lazy"
-            />
-          </div>
-        </div>
-      {/each}
-    </div>
-  </div>
+  <Navbar />
+  <Router>
+    <Route route="/images" default>
+      <AuthRequired fallback="/login">
+        <Images />
+      </AuthRequired>
+    </Route>
+    <Route route="/login">
+      <UnauthRequired fallback="/images">
+        <Login />
+      </UnauthRequired>
+    </Route>
+  </Router>
 </main>
 
 <style lang="postcss">
