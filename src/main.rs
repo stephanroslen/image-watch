@@ -12,8 +12,9 @@ mod web_socket_actor;
 use authentication_actor::{AuthenticationActor, Credentials, Token};
 use axum::{
     Json, Router,
+    body::Body,
     extract::{State, ws::WebSocketUpgrade},
-    http::StatusCode,
+    http::{Request, StatusCode},
     middleware,
     response::IntoResponse,
     routing::{get, post},
@@ -112,10 +113,34 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
                 }
             } else {
                 let resp = (StatusCode::SERVICE_UNAVAILABLE, "Service restarting").into_response();
-                return Err(resp)
+                return Err(resp);
             }
             let resp = (StatusCode::UNAUTHORIZED, "Invalid credentials").into_response();
             Err(resp)
+        }
+    };
+
+    let logout_handler = {
+        let weak_authentication_actor_sender = weak_authentication_actor_sender.clone();
+        async move |req: Request<Body>| -> std::result::Result<String, axum::response::Response> {
+            if let Some(strong_authentication_actor_sender) =
+                weak_authentication_actor_sender.upgrade()
+            {
+                if let Some(auth_token) = AuthenticationActor::extract_token(&req)
+                    && let Ok(_) = AuthenticationActor::revoke_token(
+                        strong_authentication_actor_sender,
+                        auth_token,
+                    )
+                    .await
+                {
+                    return Ok("".into());
+                }
+                let resp = (StatusCode::BAD_REQUEST, "Bad request").into_response();
+                return Err(resp);
+            } else {
+                let resp = (StatusCode::SERVICE_UNAVAILABLE, "Service restarting").into_response();
+                return Err(resp);
+            }
         }
     };
 
@@ -124,6 +149,7 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
         .route("/{*path}", get(serve_frontend))
         .route("/backend/ws", get(ws_handler))
         .route("/backend/login", post(login_handler))
+        .route("/backend/logout", post(logout_handler))
         .route("/backend/check_auth", get(empty_response))
         .nest_service("/backend/data", serve_dir_service)
         .fallback(get(axum_util::not_found))

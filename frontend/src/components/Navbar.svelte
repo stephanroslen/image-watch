@@ -5,6 +5,23 @@
   const navigate = getContext("navigate");
   const removeAuthToken = getContext("removeAuthToken");
 
+  function handleLogout() {
+    (async () => {
+      try {
+        const response = await fetch("/backend/logout", {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/plain",
+            Authorization: "Bearer " + authToken(),
+          },
+        });
+
+        const status = response.status;
+        const body = await response.text();
+      } catch (err) {}
+    })().then(removeAuthToken());
+  }
+
   let isLoggedIn = $derived(authToken() !== null);
 </script>
 
@@ -18,21 +35,22 @@
         <li>
           <button
             class="btn btn-ghost text-xl"
-            onclick={() => navigate("/images")}>Images</button
-          >
+            onclick={() => navigate("/images")}
+            >Images
+          </button>
         </li>
         <li>
-          <button
-            class="btn btn-ghost text-xl"
-            onclick={() => removeAuthToken()}>Logout</button
-          >
+          <button class="btn btn-ghost text-xl" onclick={() => handleLogout()}
+            >Logout
+          </button>
         </li>
       {:else}
         <li>
           <button
             class="btn btn-ghost text-xl"
-            onclick={() => navigate("/login")}>Login</button
-          >
+            onclick={() => navigate("/login")}
+            >Login
+          </button>
         </li>
       {/if}
     </ul>
