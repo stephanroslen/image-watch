@@ -5,7 +5,7 @@ mod error;
 mod file_change_data;
 mod file_change_tracker_actor;
 mod file_tracker_actor;
-mod serve_frontend;
+mod frontend;
 mod tokio_util;
 mod web_socket_actor;
 
@@ -23,7 +23,7 @@ use axum_util::empty_response;
 use error::Result;
 use file_change_tracker_actor::FileChangeTrackerActor;
 use file_tracker_actor::{FileTrackerActor, FileTrackerActorEvent};
-use serve_frontend::serve_frontend;
+use frontend::serve_frontend;
 use std::{panic, process, sync::Arc};
 use tokio::{sync::mpsc, task::JoinSet};
 use tower_http::{compression::CompressionLayer, services::fs::ServeDir, trace, trace::TraceLayer};
