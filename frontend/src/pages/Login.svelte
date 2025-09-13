@@ -1,10 +1,13 @@
 <script>
   import { getContext } from "svelte";
 
-  let setAuthToken = getContext("setAuthToken");
+  const setAuthToken = getContext("setAuthToken");
+  const verifyFrontendHash = getContext("verifyFrontendHash");
 
   let username = "";
   let password = "";
+
+  verifyFrontendHash();
 
   async function getToken(username, password) {
     try {
@@ -100,8 +103,8 @@
 
     <div class="flex justify-end m-4">
       <button class="btn btn-secondary text-lg px-6 py-3" onclick={handleLogin}
-        >Login</button
-      >
+        >Login
+      </button>
     </div>
   </div>
 </div>

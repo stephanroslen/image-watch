@@ -6,6 +6,7 @@ use axum::{
 };
 use mime_guess::from_path;
 use rust_embed::Embed;
+use std::hash::{Hash, Hasher};
 
 #[derive(Embed)]
 #[folder = "frontend/dist/"]
@@ -41,4 +42,22 @@ pub async fn serve_frontend(
         tracing::debug!("Failed to serve {}", path);
         Err(crate::axum_util::not_found().await)
     }
+}
+
+pub fn frontend_hash() -> String {
+    let mut files: Vec<_> = Frontend::iter().collect();
+    files.sort();
+    let shas: Vec<_> = files
+        .iter()
+        .map(|f| {
+            Frontend::get(f)
+                .expect("File expected")
+                .metadata
+                .sha256_hash()
+        })
+        .collect();
+
+    let mut hasher = std::hash::DefaultHasher::new();
+    shas.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }

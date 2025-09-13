@@ -9,8 +9,9 @@
   let images = $state([]);
   let connected = $state(false);
 
-  let token = getContext("authToken");
-  let removeAuthToken = getContext("removeAuthToken");
+  const token = getContext("authToken");
+  const removeAuthToken = getContext("removeAuthToken");
+  const verifyFrontendHash = getContext("verifyFrontendHash");
 
   let dummy_images = [];
 
@@ -68,6 +69,7 @@
       connected = true;
       dummy_images = [];
       reconnectTimeout = originalReconnectTimeout;
+      verifyFrontendHash();
       scheduleKeepalive();
     });
 
