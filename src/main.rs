@@ -1,3 +1,4 @@
+mod authentication_actor;
 mod axum_util;
 mod config;
 mod error;
@@ -8,13 +9,16 @@ mod serve_frontend;
 mod tokio_util;
 mod web_socket_actor;
 
+use authentication_actor::{AuthenticationActor, Credentials, Token};
 use axum::{
-    Router,
+    Json, Router,
     extract::{State, ws::WebSocketUpgrade},
+    http::StatusCode,
     middleware,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
 };
+use axum_util::empty_response;
 use error::Result;
 use file_change_tracker_actor::FileChangeTrackerActor;
 use file_tracker_actor::{FileTrackerActor, FileTrackerActorEvent};
@@ -84,31 +88,57 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
 
     join_set.spawn(file_tracker_actor.run(file_tracker_actor_receiver));
 
+    let (autentication_actor_sender, authentication_actor_receiver) = mpsc::channel(8);
+
+    let weak_authentication_actor_sender = autentication_actor_sender.downgrade();
+
+    let authentication_actor = AuthenticationActor::new(config.auth_user, config.auth_pass_argon2);
+
+    join_set.spawn(authentication_actor.run(authentication_actor_receiver));
+
     let serve_dir_service = ServeDir::new(&config.serve_dir).fallback(get(axum_util::not_found));
 
-    let mut app = Router::new()
+    let login_handler = {
+        let weak_authentication_actor_sender = weak_authentication_actor_sender.clone();
+        async move |Json(credentials): Json<Option<Credentials>>| -> std::result::Result<String, axum::response::Response> {
+            if let Some(strong_authentication_actor_sender) = weak_authentication_actor_sender.upgrade() {
+                if let Some(credentials) = credentials {
+                    let token =
+                        AuthenticationActor::get_token(strong_authentication_actor_sender,
+                                                       credentials).await;
+                    if let Ok(token) = token && let Some(Token(token)) = token {
+                        return Ok(token);
+                    }
+                }
+            } else {
+                let resp = (StatusCode::SERVICE_UNAVAILABLE, "Service restarting").into_response();
+                return Err(resp)
+            }
+            let resp = (StatusCode::UNAUTHORIZED, "Invalid credentials").into_response();
+            Err(resp)
+        }
+    };
+
+    let app = Router::new()
         .route("/", get(serve_frontend))
         .route("/{*path}", get(serve_frontend))
-        .route("/ws", get(ws_handler))
-        .nest_service("/data", serve_dir_service)
+        .route("/backend/ws", get(ws_handler))
+        .route("/backend/login", post(login_handler))
+        .route("/backend/check_auth", get(empty_response))
+        .nest_service("/backend/data", serve_dir_service)
         .fallback(get(axum_util::not_found))
         .with_state(Arc::new(WsState {
             file_tracker_actor_sender: file_tracker_actor_sender.downgrade(),
-        }));
-
-    if !config.auth_disabled {
-        app = app.layer(middleware::from_fn(move |req, next| {
-            axum_util::basic_auth(
-                req,
-                next,
-                config.auth_user.clone(),
-                config.auth_pass_argon2.clone(),
-            )
-        }));
-    }
-
-    // tracing must happen after adding auth layer so failed auth gets logged
-    app = app
+        }))
+        .layer(middleware::from_fn({
+            move |req, next| {
+                AuthenticationActor::auth_request(
+                    weak_authentication_actor_sender.clone(),
+                    req,
+                    next,
+                )
+            }
+        }))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))

@@ -7,7 +7,6 @@ use std::{
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub auth_disabled: bool,
     pub auth_pass_argon2: String,
     pub auth_user: String,
     pub file_extensions: Vec<String>,
@@ -18,19 +17,8 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        let auth_disabled = env::var("AUTH_DISABLED")
-            .unwrap_or("false".into())
-            .parse::<bool>()?;
-        let auth_pass_argon2 = if !auth_disabled {
-            env::var("AUTH_PASS_ARGON2")?
-        } else {
-            "".into()
-        };
-        let auth_user = if !auth_disabled {
-            env::var("AUTH_USER")?
-        } else {
-            "".into()
-        };
+        let auth_pass_argon2 = env::var("AUTH_PASS_ARGON2")?;
+        let auth_user = env::var("AUTH_USER")?;
 
         let raw_file_extensions = env::var("FILE_EXTENSIONS").unwrap_or("jpg,jpeg".to_string());
         let file_extensions = raw_file_extensions
@@ -49,7 +37,6 @@ impl Config {
         let listen_address = env::var("LISTEN_ADDRESS").unwrap_or("127.0.0.1:3000".to_string());
 
         let config = Self {
-            auth_disabled,
             auth_pass_argon2,
             auth_user,
             file_extensions,
