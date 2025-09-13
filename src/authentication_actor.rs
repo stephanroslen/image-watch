@@ -35,6 +35,9 @@ pub enum AuthenticationActorEvent {
         credentials: Credentials,
         response_sender: tokio::sync::oneshot::Sender<Option<Token>>,
     },
+    RevokeToken {
+        token: Token,
+    },
 }
 
 #[derive(Debug)]
@@ -90,6 +93,10 @@ impl AuthenticationActor {
         }
     }
 
+    async fn remove_token(&mut self, token: Token) {
+        self.tokens.remove(&token);
+    }
+
     #[instrument]
     pub async fn run(mut self, mut receiver: mpsc::Receiver<AuthenticationActorEvent>) {
         tracing::debug!("actor started");
@@ -122,6 +129,9 @@ impl AuthenticationActor {
                             )
                         });
                 }
+                AuthenticationActorEvent::RevokeToken { token } => {
+                    self.remove_token(token).await;
+                }
             }
         }
         tracing::debug!("stopped");
@@ -133,21 +143,7 @@ impl AuthenticationActor {
         next: Next,
     ) -> Result<Response, Response> {
         if let Some(sender) = sender.upgrade() {
-            let headers: &HeaderMap = req.headers();
-
-            let auth_token = headers
-                .get(header::AUTHORIZATION)
-                .and_then(|auth_header| auth_header.to_str().ok())
-                .and_then(|auth_str| auth_str.strip_prefix("Bearer "))
-                .map(|token| Token(token.to_string()));
-
-            let web_socket_auth_token = headers
-                .get(header::SEC_WEBSOCKET_PROTOCOL)
-                .and_then(|auth_header| auth_header.to_str().ok())
-                .and_then(|auth_str| auth_str.strip_prefix("bearer, "))
-                .map(|token| Token(token.to_string()));
-
-            let token = auth_token.or(web_socket_auth_token);
+            let token = Self::extract_token(&req);
 
             let (response_sender, response_receiver) = tokio::sync::oneshot::channel();
 
@@ -186,5 +182,32 @@ impl AuthenticationActor {
             })
             .await?;
         Ok(response_receiver.await?)
+    }
+
+    pub async fn revoke_token(
+        sender: mpsc::Sender<AuthenticationActorEvent>,
+        token: Token,
+    ) -> crate::error::Result<()> {
+        sender
+            .send(AuthenticationActorEvent::RevokeToken { token })
+            .await?;
+        Ok(())
+    }
+
+    pub fn extract_token(req: &Request<Body>) -> Option<Token> {
+        let headers: &HeaderMap = req.headers();
+
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|auth_header| auth_header.to_str().ok())
+            .and_then(|auth_str| auth_str.strip_prefix("Bearer "))
+            .map(|token| Token(token.to_string()))
+            .or_else(|| {
+                headers
+                    .get(header::SEC_WEBSOCKET_PROTOCOL)
+                    .and_then(|auth_header| auth_header.to_str().ok())
+                    .and_then(|auth_str| auth_str.strip_prefix("bearer, "))
+                    .map(|token| Token(token.to_string()))
+            })
     }
 }
