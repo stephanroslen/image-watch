@@ -95,7 +95,10 @@ impl AuthenticationActor {
     async fn authenticate_request(&mut self, token: Option<Token>, uri: Uri) -> bool {
         let path = uri.path();
         // TODO: more flexible check
-        if !path.starts_with("/backend") || path == "/backend/login" {
+        if !path.starts_with("/backend")
+            || path == "/backend/login"
+            || path == "/backend/frontend_hash"
+        {
             return true;
         }
         if let Some(token) = token {

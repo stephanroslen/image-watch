@@ -3,8 +3,8 @@
 
   let { children, fallback } = $props();
 
-  let authToken = getContext("authToken");
-  let navigate = getContext("navigate");
+  const authToken = getContext("authToken");
+  const navigate = getContext("navigate");
 
   let isLoggedIn = $derived(authToken() !== null);
 

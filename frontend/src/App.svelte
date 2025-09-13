@@ -15,6 +15,44 @@
 
   setContext("currentRoute", () => currentRoute);
 
+  async function getFrontendHash() {
+    try {
+      const response = await fetch("/backend/frontend_hash", {
+        method: "GET",
+      });
+
+      const status = response.status;
+
+      if (status === 200) {
+        const result = await response.text();
+        return result;
+      }
+      return null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  let initialFrontendHash;
+  getFrontendHash().then((hash) => {
+    if (hash === null) {
+      location.reload();
+    }
+    initialFrontendHash = hash;
+  });
+
+  function verifyFrontendHash() {
+    getFrontendHash().then((hash) => {
+      if (
+        initialFrontendHash !== null &&
+        hash !== null &&
+        initialFrontendHash !== hash
+      ) {
+        location.reload();
+      }
+    });
+  }
+
   function navigate(path) {
     history.pushState({}, "", path);
     currentRoute = path;
@@ -31,6 +69,7 @@
     navigate("/images");
   }
 
+  setContext("verifyFrontendHash", verifyFrontendHash);
   setContext("setAuthToken", setAuthToken);
   setContext("removeAuthToken", removeAuthToken);
   setContext("authToken", () => authToken);

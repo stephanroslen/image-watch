@@ -15,8 +15,8 @@
   let imgElement;
   let observer;
 
-  let authToken = getContext("authToken");
-  let removeToken = getContext("removeToken");
+  const authToken = getContext("authToken");
+  const removeToken = getContext("removeToken");
 
   async function loadImage() {
     if (!src || !token) return;

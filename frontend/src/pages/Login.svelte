@@ -1,10 +1,13 @@
 <script>
   import { getContext } from "svelte";
 
-  let setAuthToken = getContext("setAuthToken");
+  const setAuthToken = getContext("setAuthToken");
+  const verifyFrontendHash = getContext("verifyFrontendHash");
 
   let username = "";
   let password = "";
+
+  verifyFrontendHash();
 
   async function getToken(username, password) {
     try {

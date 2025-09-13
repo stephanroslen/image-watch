@@ -77,6 +77,8 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
 
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
+    let frontend_hash = frontend::frontend_hash();
+
     let _ = dotenvy_result.inspect_err(|e| tracing::warn!("Couldn't load .env: {}", e));
 
     let config = config::Config::from_env()?;
@@ -157,6 +159,10 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
         .route("/backend/login", post(login_handler))
         .route("/backend/logout", post(logout_handler))
         .route("/backend/keepalive", get(empty_response))
+        .route(
+            "/backend/frontend_hash",
+            get(async move || -> String { frontend_hash }),
+        )
         .nest_service("/backend/data", serve_dir_service)
         .fallback(get(axum_util::not_found))
         .with_state(Arc::new(WsState {
