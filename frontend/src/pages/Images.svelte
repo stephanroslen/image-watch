@@ -152,39 +152,37 @@
   connect();
 </script>
 
-<main>
-  {#if !connected}
-    <div class="fixed bottom-0 right-0 m-4 z-50">
-      <div role="alert" class="alert alert-error">
-        <span class="loading loading-spinner loading-xs"></span>
-        <span>WebSocket connection lost - reconnecting!</span>
-      </div>
-    </div>
-  {/if}
-
-  <div class="p-4">
-    <div
-      class="w-[95%] mx-auto grid gap-4 bg-neutral-content text-neutral-content rounded-xl p-4 min-h-[calc(100vh-180px)] place-content-start justify-items-center"
-      class:grid-cols-1={grid_columns === 1}
-      class:grid-cols-2={grid_columns === 2}
-      class:grid-cols-3={grid_columns === 3}
-    >
-      {#each images as img (img.name)}
-        <div
-          class="rounded-xl"
-          in:fade={{ duration: 300 }}
-          out:fade={{ duration: 100 }}
-        >
-          <div class="tooltip tooltip-info tooltip-bottom" data-tip={img.name}>
-            <Image
-              src={`/backend/data/${img.name}`}
-              alt={img.name}
-              class="w-full transition duration-300"
-              loading="lazy"
-            />
-          </div>
-        </div>
-      {/each}
+{#if !connected}
+  <div class="fixed bottom-0 right-0 m-4 z-50">
+    <div role="alert" class="alert alert-error">
+      <span class="loading loading-spinner loading-xs"></span>
+      <span>WebSocket connection lost - reconnecting!</span>
     </div>
   </div>
-</main>
+{/if}
+
+<div class="p-4">
+  <div
+    class="w-[95%] mx-auto grid gap-4 bg-neutral-content text-neutral-content rounded-xl p-4 min-h-[calc(100vh-180px)] place-content-start justify-items-center"
+    class:grid-cols-1={grid_columns === 1}
+    class:grid-cols-2={grid_columns === 2}
+    class:grid-cols-3={grid_columns === 3}
+  >
+    {#each images as img (img.name)}
+      <div
+        class="rounded-xl"
+        in:fade={{ duration: 300 }}
+        out:fade={{ duration: 100 }}
+      >
+        <div class="tooltip tooltip-info tooltip-bottom" data-tip={img.name}>
+          <Image
+            src={`/backend/data/${img.name}`}
+            alt={img.name}
+            class="w-full transition duration-300"
+            loading="lazy"
+          />
+        </div>
+      </div>
+    {/each}
+  </div>
+</div>
