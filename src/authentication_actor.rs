@@ -52,7 +52,8 @@ pub enum AuthenticationActorEvent {
 #[derive(Debug)]
 pub struct AuthenticationActor {
     tokens: std::collections::HashMap<Token, Username>,
-    reverse: std::collections::HashMap<Username, Vec<(Token, Deadline)>>,
+    token_deadlines:
+        std::collections::HashMap<Username, std::collections::HashMap<Token, Deadline>>,
     username: String,
     password_argon2: String,
     cleanup_timer: Interval,
@@ -69,13 +70,13 @@ impl AuthenticationActor {
         auth_token_max_per_user: usize,
     ) -> Self {
         let tokens = std::collections::HashMap::new();
-        let reverse = std::collections::HashMap::new();
+        let token_deadlines = std::collections::HashMap::new();
         let mut cleanup_timer = tokio::time::interval(auth_token_cleanup_interval);
         // continue with intended interval even if the timer is missed
         cleanup_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
         Self {
             tokens,
-            reverse,
+            token_deadlines,
             username,
             password_argon2,
             cleanup_timer,
@@ -91,16 +92,27 @@ impl AuthenticationActor {
             .is_ok())
     }
 
-    async fn authenticate_request(&self, token: Option<Token>, uri: Uri) -> bool {
+    async fn authenticate_request(&mut self, token: Option<Token>, uri: Uri) -> bool {
         let path = uri.path();
         // TODO: more flexible check
         if !path.starts_with("/backend") || path == "/backend/login" {
             return true;
         }
         if let Some(token) = token {
-            return self.tokens.contains_key(&token);
+            if let Some(username) = self.tokens.get(&token) {
+                self.token_deadlines
+                    .entry(username.clone())
+                    .or_default()
+                    .insert(token, Self::make_deadline(self.auth_token_ttl));
+                return true;
+            }
+            return false;
         }
         false
+    }
+
+    fn make_deadline(auth_token_ttl: std::time::Duration) -> Deadline {
+        Deadline(std::time::Instant::now() + auth_token_ttl)
     }
 
     async fn authenticate(
@@ -115,10 +127,10 @@ impl AuthenticationActor {
             let token = Token::generate();
             self.tokens
                 .insert(token.clone(), Username(username.clone()));
-            self.reverse.entry(Username(username)).or_default().push((
-                token.clone(),
-                Deadline(std::time::Instant::now() + self.auth_token_ttl),
-            ));
+            self.token_deadlines
+                .entry(Username(username))
+                .or_default()
+                .insert(token.clone(), Self::make_deadline(self.auth_token_ttl));
             Some(token)
         } else {
             None
@@ -132,9 +144,9 @@ impl AuthenticationActor {
     async fn cleanup(&mut self) {
         let now = std::time::Instant::now();
 
-        for (_, tokens) in self.reverse.iter_mut() {
+        for (_, tokens) in self.token_deadlines.iter_mut() {
             let mut survivors = Vec::new();
-            for (token, deadline) in tokens.drain(..) {
+            for (token, deadline) in tokens.drain() {
                 if deadline.0 < now {
                     self.tokens.remove(&token);
                 } else {
@@ -147,10 +159,10 @@ impl AuthenticationActor {
                     self.tokens.remove(&token);
                 }
             }
-            *tokens = survivors;
+            *tokens = survivors.drain(..).collect();
         }
 
-        self.reverse.retain(|_, tokens| !tokens.is_empty());
+        self.token_deadlines.retain(|_, tokens| !tokens.is_empty());
     }
 
     #[instrument]
