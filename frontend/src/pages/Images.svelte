@@ -37,13 +37,12 @@
   const originalReconnectTimeout = 500;
   let reconnectTimeout = originalReconnectTimeout;
   const maxReconnectTimeout = 3000;
-  const keepaliveInterval = 60000;
 
   let connectScheduled = false;
 
-  async function keepalive() {
+  async function checkauth() {
     try {
-      const response = await fetch("/backend/keepalive", {
+      const response = await fetch("/backend/checkauth", {
         method: "GET",
         headers: {
           Authorization: "Bearer " + token(),
@@ -70,7 +69,6 @@
       dummy_images = [];
       reconnectTimeout = originalReconnectTimeout;
       verifyFrontendHash();
-      scheduleKeepalive();
     });
 
     ws.addEventListener("close", () => {
@@ -98,7 +96,7 @@
 
     function closeAndErrorHandler() {
       connected = false;
-      keepalive().then((result) => {
+      checkauth().then((result) => {
         if (result === 401) {
           removeAuthToken();
         } else {
@@ -118,20 +116,6 @@
       }, reconnectTimeout);
 
       reconnectTimeout = Math.min(reconnectTimeout * 2, maxReconnectTimeout);
-    }
-
-    function scheduleKeepalive() {
-      if (connected) {
-        setTimeout(() => {
-          keepalive().then((result) => {
-            if (result === 401) {
-              removeAuthToken();
-            } else {
-              scheduleKeepalive();
-            }
-          });
-        }, keepaliveInterval);
-      }
     }
 
     function insertSorted(img) {

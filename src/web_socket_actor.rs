@@ -1,4 +1,5 @@
-use crate::{error::Result, file_change_data::FileChangeData};
+use crate::authentication_actor::{AuthenticationActor, Token};
+use crate::{authentication_actor, error::Result, file_change_data::FileChangeData};
 use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
 use tokio::sync::mpsc;
 use tracing::instrument;
@@ -11,11 +12,26 @@ pub enum WebSocketActorEvent {
 #[derive(Debug)]
 pub struct WebSocketActor {
     ws: WebSocket,
+    authentication_actor_sender: mpsc::Sender<authentication_actor::AuthenticationActorEvent>,
+    token_refresh_timer: tokio::time::Interval,
+    token: Token,
 }
 
 impl WebSocketActor {
-    pub fn new(ws: WebSocket) -> Self {
-        Self { ws }
+    pub fn new(
+        ws: WebSocket,
+        authentication_actor_sender: mpsc::Sender<authentication_actor::AuthenticationActorEvent>,
+        token_refresh_interval: std::time::Duration,
+        token: Token,
+    ) -> Self {
+        let mut token_refresh_timer = tokio::time::interval(token_refresh_interval);
+        token_refresh_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        Self {
+            ws,
+            authentication_actor_sender,
+            token_refresh_timer,
+            token,
+        }
     }
 
     async fn ws_send_change(&mut self, change: FileChangeData) -> Result<()> {
@@ -60,6 +76,12 @@ impl WebSocketActor {
                         break;
                     }
                 },
+                _ = self.token_refresh_timer.tick() => {
+                    let result = AuthenticationActor::refresh_token(self.authentication_actor_sender.clone(), self.token.clone()).await;
+                    if !result.inspect_err(|e| tracing::error!("failed to refresh token: {}", e)).unwrap_or(false) {
+                        break;
+                    }
+                }
             }
         }
         tracing::debug!("actor stopped");

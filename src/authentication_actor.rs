@@ -1,4 +1,5 @@
 use argon2::{Argon2, PasswordHash, PasswordVerifier, password_hash::Error};
+use axum::http::HeaderValue;
 use axum::{
     body::Body,
     http::{HeaderMap, Request, StatusCode, Uri, header},
@@ -43,6 +44,10 @@ pub enum AuthenticationActorEvent {
     GetToken {
         credentials: Credentials,
         response_sender: tokio::sync::oneshot::Sender<Option<Token>>,
+    },
+    RefreshToken {
+        token: Token,
+        response_sender: tokio::sync::oneshot::Sender<bool>,
     },
     RevokeToken {
         token: Token,
@@ -102,14 +107,18 @@ impl AuthenticationActor {
             return true;
         }
         if let Some(token) = token {
-            if let Some(username) = self.tokens.get(&token) {
-                self.token_deadlines
-                    .entry(username.clone())
-                    .or_default()
-                    .insert(token, Self::make_deadline(self.auth_token_ttl));
-                return true;
-            }
-            return false;
+            return self.check_and_refresh_token(token);
+        }
+        false
+    }
+
+    fn check_and_refresh_token(&mut self, token: Token) -> bool {
+        if let Some(username) = self.tokens.get(&token) {
+            self.token_deadlines
+                .entry(username.clone())
+                .or_default()
+                .insert(token, Self::make_deadline(self.auth_token_ttl));
+            return true;
         }
         false
     }
@@ -203,6 +212,11 @@ impl AuthenticationActor {
                                         )
                                     });
                             }
+                            AuthenticationActorEvent::RefreshToken { token , response_sender: response} => {
+                                let _ = response
+                                    .send(self.check_and_refresh_token(token.clone()))
+                                    .inspect_err(|e| {tracing::error!("Error responding to AuthenticatorEvent::RefreshToken: {:?}", e)});
+                            }
                             AuthenticationActorEvent::RevokeToken { token } => {
                                 self.remove_token(token).await;
                             }
@@ -223,7 +237,7 @@ impl AuthenticationActor {
         next: Next,
     ) -> Result<Response, Response> {
         if let Some(sender) = sender.upgrade() {
-            let token = Self::extract_token(&req);
+            let token = Self::extract_token(&req.headers());
 
             let (response_sender, response_receiver) = tokio::sync::oneshot::channel();
 
@@ -274,9 +288,21 @@ impl AuthenticationActor {
         Ok(())
     }
 
-    pub fn extract_token(req: &Request<Body>) -> Option<Token> {
-        let headers: &HeaderMap = req.headers();
+    pub async fn refresh_token(
+        sender: mpsc::Sender<AuthenticationActorEvent>,
+        token: Token,
+    ) -> crate::error::Result<bool> {
+        let (response_sender, response_receiver) = tokio::sync::oneshot::channel();
+        sender
+            .send(AuthenticationActorEvent::RefreshToken {
+                token,
+                response_sender,
+            })
+            .await?;
+        Ok(response_receiver.await?)
+    }
 
+    pub fn extract_token(headers: &HeaderMap<HeaderValue>) -> Option<Token> {
         headers
             .get(header::AUTHORIZATION)
             .and_then(|auth_header| auth_header.to_str().ok())
