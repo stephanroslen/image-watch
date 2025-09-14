@@ -36,13 +36,18 @@ struct WsState {
 }
 
 #[instrument]
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WsState>>) -> impl IntoResponse {
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    headers: axum::http::HeaderMap,
+    State(state): State<Arc<WsState>>,
+) -> impl IntoResponse {
+    let token =
+        AuthenticationActor::extract_token(&headers).expect("Token expected as per previous auth");
     ws.on_upgrade(async move |socket| {
-        tracing::debug!("on_upgrade");
         let file_tracker_actor_sender = state.file_tracker_actor_sender.upgrade();
         if let Some(file_tracker_actor_sender) = file_tracker_actor_sender {
             tracing::debug!("got file tracker actor sender");
-            FileTrackerActor::add_web_socket(&file_tracker_actor_sender, socket)
+            FileTrackerActor::add_web_socket(&file_tracker_actor_sender, socket, token)
                 .await
                 .expect("Expected to be able to add web socket");
         }
@@ -85,15 +90,9 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&config.listen_address).await?;
 
-    let (file_tracker_actor_sender, file_tracker_actor_receiver) = mpsc::channel(8);
+    let (authentication_actor_sender, authentication_actor_receiver) = mpsc::channel(8);
 
-    let file_tracker_actor = FileTrackerActor::new();
-
-    join_set.spawn(file_tracker_actor.run(file_tracker_actor_receiver));
-
-    let (autentication_actor_sender, authentication_actor_receiver) = mpsc::channel(8);
-
-    let weak_authentication_actor_sender = autentication_actor_sender.downgrade();
+    let weak_authentication_actor_sender = authentication_actor_sender.downgrade();
 
     let authentication_actor = AuthenticationActor::new(
         config.auth_user,
@@ -104,6 +103,15 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
     );
 
     join_set.spawn(authentication_actor.run(authentication_actor_receiver));
+
+    let (file_tracker_actor_sender, file_tracker_actor_receiver) = mpsc::channel(8);
+
+    let file_tracker_actor = FileTrackerActor::new(
+        authentication_actor_sender.clone(),
+        config.auth_token_ttl * 9 / 10,
+    );
+
+    join_set.spawn(file_tracker_actor.run(file_tracker_actor_receiver));
 
     let serve_dir_service = ServeDir::new(&config.serve_dir).fallback(get(axum_util::not_found));
 
@@ -134,7 +142,7 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
             if let Some(strong_authentication_actor_sender) =
                 weak_authentication_actor_sender.upgrade()
             {
-                if let Some(auth_token) = AuthenticationActor::extract_token(&req)
+                if let Some(auth_token) = AuthenticationActor::extract_token(&req.headers())
                     && let Ok(_) = AuthenticationActor::revoke_token(
                         strong_authentication_actor_sender,
                         auth_token,
@@ -158,7 +166,7 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
         .route("/backend/ws", get(ws_handler))
         .route("/backend/login", post(login_handler))
         .route("/backend/logout", post(logout_handler))
-        .route("/backend/keepalive", get(empty_response))
+        .route("/backend/checkauth", get(empty_response))
         .route(
             "/backend/frontend_hash",
             get(async move || -> String { frontend_hash }),

@@ -1,5 +1,7 @@
+use crate::authentication_actor::AuthenticationActorEvent;
 use crate::web_socket_actor::WebSocketActorEvent;
 use crate::{
+    authentication_actor,
     error::Result,
     file_change_data::{FileAddData, FileChangeData, FileRemoveData},
     web_socket_actor::WebSocketActor,
@@ -24,23 +26,30 @@ impl WebSocketActorSenderAndJoinHandle {
 #[derive(Debug)]
 pub enum FileTrackerActorEvent {
     Change(FileChangeData),
-    AddWebSocket(WebSocket),
+    AddWebSocket(WebSocket, authentication_actor::Token),
 }
 
 #[derive(Debug)]
 pub struct FileTrackerActor {
     baseline: FileAddData,
     web_socket_actor_senders_and_join_handles: Vec<WebSocketActorSenderAndJoinHandle>,
+    authentication_actor_sender: mpsc::Sender<AuthenticationActorEvent>,
+    token_refresh_interval: std::time::Duration,
 }
 
 impl FileTrackerActor {
-    pub fn new() -> Self {
+    pub fn new(
+        authentication_actor_sender: mpsc::Sender<AuthenticationActorEvent>,
+        token_refresh_interval: std::time::Duration,
+    ) -> Self {
         let baseline = FileAddData::new();
         let web_socket_actor_senders_and_join_handles = Vec::new();
 
         Self {
             baseline,
             web_socket_actor_senders_and_join_handles,
+            authentication_actor_sender,
+            token_refresh_interval,
         }
     }
 
@@ -117,10 +126,15 @@ impl FileTrackerActor {
                 FileTrackerActorEvent::Change(change) => {
                     self.handle_change(change).await;
                 }
-                FileTrackerActorEvent::AddWebSocket(ws) => {
+                FileTrackerActorEvent::AddWebSocket(ws, token) => {
                     tracing::debug!("adding web socket");
                     let (sender, receiver) = mpsc::channel::<_>(8);
-                    let ws_actor = WebSocketActor::new(ws);
+                    let ws_actor = WebSocketActor::new(
+                        ws,
+                        self.authentication_actor_sender.clone(),
+                        self.token_refresh_interval,
+                        token,
+                    );
                     let join_handle = tokio::task::spawn(ws_actor.run(receiver));
                     let sender_and_join_handle = WebSocketActorSenderAndJoinHandle {
                         sender,
@@ -175,8 +189,11 @@ impl FileTrackerActor {
     pub async fn add_web_socket(
         sender: &mpsc::Sender<FileTrackerActorEvent>,
         ws: WebSocket,
+        token: authentication_actor::Token,
     ) -> Result<()> {
-        sender.send(FileTrackerActorEvent::AddWebSocket(ws)).await?;
+        sender
+            .send(FileTrackerActorEvent::AddWebSocket(ws, token))
+            .await?;
         Ok(())
     }
 }
