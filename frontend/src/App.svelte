@@ -53,8 +53,12 @@
     });
   }
 
-  function navigate(path) {
-    history.pushState({}, "", path);
+  function navigate(path, replace = false) {
+    if (replace) {
+      history.replaceState({}, "", path);
+    } else {
+      history.pushState({}, "", path);
+    }
     currentRoute = path;
   }
 
