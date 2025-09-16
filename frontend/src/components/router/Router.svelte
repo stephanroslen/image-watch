@@ -20,10 +20,17 @@
   setContext("setDefaultRoute", setDefaultRoute);
 
   const currentRoute = getContext("currentRoute");
+  const navigate = getContext("navigate");
 
   let selectedRoute = $derived(
     knownRoutes.find((route) => route === currentRoute()) || defaultRoute,
   );
+
+  $effect(() => {
+    if (selectedRoute !== currentRoute()) {
+      navigate(selectedRoute, true);
+    }
+  });
 
   setContext("selectedRoute", () => selectedRoute);
 

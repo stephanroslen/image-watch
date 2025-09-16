@@ -10,7 +10,7 @@
 
   $effect(() => {
     if (!isLoggedIn) {
-      navigate(fallback);
+      navigate(fallback, true);
     }
   });
 </script>
