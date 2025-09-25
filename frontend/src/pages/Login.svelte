@@ -1,11 +1,15 @@
 <script>
-  import { getContext } from "svelte";
+  import { getContext, onMount } from "svelte";
 
   const setAuthToken = getContext("setAuthToken");
   const verifyFrontendHash = getContext("verifyFrontendHash");
 
   let username = "";
   let password = "";
+
+  let usernameInput;
+  let passwordInput;
+  let loginButton;
 
   verifyFrontendHash();
 
@@ -40,6 +44,24 @@
       setAuthToken(token);
     });
   }
+
+  onMount(() => {
+    usernameInput.focus();
+  });
+
+  function handleUsernameKeyDown(event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      passwordInput.focus();
+    }
+  }
+
+  function handlePasswordKeyDown(event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      loginButton.click();
+    }
+  }
 </script>
 
 <div class="flex items-center justify-center min-h-[calc(100vh-180px)]">
@@ -62,11 +84,15 @@
           </g>
         </svg>
         <input
+          bind:this={usernameInput}
           bind:value={username}
           type="text"
           required
           placeholder="Username"
           class="p-2 flex-1 border text-xl"
+          autocapitalize="none"
+          spellcheck="false"
+          onkeydown={handleUsernameKeyDown}
         />
       </label>
     </div>
@@ -91,17 +117,23 @@
           </g>
         </svg>
         <input
+          bind:this={passwordInput}
           bind:value={password}
           type="password"
           required
           placeholder="Password"
           class="p-2 flex-1 border text-xl"
+          onkeydown={handlePasswordKeyDown}
         />
       </label>
     </div>
 
     <div class="flex justify-end m-4">
-      <button class="btn btn-secondary text-lg px-6 py-3" onclick={handleLogin}>
+      <button
+        bind:this={loginButton}
+        class="btn btn-secondary text-lg px-6 py-3"
+        onclick={handleLogin}
+      >
         Login
       </button>
     </div>
