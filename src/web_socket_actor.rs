@@ -1,5 +1,13 @@
-use crate::authentication_actor::{AuthenticationActor, Token};
-use crate::{authentication_actor, error::Result, file_change_data::FileChangeData};
+use crate::{
+    authentication::{
+        Token,
+        authentication_token_store_actor::{
+            AuthenticationTokenStoreActor, AuthenticationTokenStoreActorEvent,
+        },
+    },
+    error::Result,
+    file_change_data::FileChangeData,
+};
 use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
 use tokio::sync::mpsc;
 use tracing::instrument;
@@ -12,7 +20,7 @@ pub enum WebSocketActorEvent {
 #[derive(Debug)]
 pub struct WebSocketActor {
     ws: WebSocket,
-    authentication_actor_sender: mpsc::Sender<authentication_actor::AuthenticationActorEvent>,
+    authentication_token_store_actor_sender: mpsc::Sender<AuthenticationTokenStoreActorEvent>,
     token_refresh_timer: tokio::time::Interval,
     token: Token,
 }
@@ -20,7 +28,7 @@ pub struct WebSocketActor {
 impl WebSocketActor {
     pub fn new(
         ws: WebSocket,
-        authentication_actor_sender: mpsc::Sender<authentication_actor::AuthenticationActorEvent>,
+        authentication_token_store_actor_sender: mpsc::Sender<AuthenticationTokenStoreActorEvent>,
         token_refresh_interval: std::time::Duration,
         token: Token,
     ) -> Self {
@@ -28,7 +36,7 @@ impl WebSocketActor {
         token_refresh_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         Self {
             ws,
-            authentication_actor_sender,
+            authentication_token_store_actor_sender,
             token_refresh_timer,
             token,
         }
@@ -77,7 +85,7 @@ impl WebSocketActor {
                     }
                 },
                 _ = self.token_refresh_timer.tick() => {
-                    let result = AuthenticationActor::refresh_token(self.authentication_actor_sender.clone(), self.token.clone()).await;
+                    let result = AuthenticationTokenStoreActor::check_and_refresh_token(&mut self.authentication_token_store_actor_sender, self.token.clone()).await;
                     if !result.inspect_err(|e| tracing::error!("failed to refresh token: {}", e)).unwrap_or(false) {
                         break;
                     }

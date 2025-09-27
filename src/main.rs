@@ -1,4 +1,4 @@
-mod authentication_actor;
+mod authentication;
 mod axum_util;
 mod config;
 mod error;
@@ -9,7 +9,11 @@ mod frontend;
 mod tokio_util;
 mod web_socket_actor;
 
-use authentication_actor::{AuthenticationActor, Credentials, Token};
+use authentication::{
+    Token,
+    authentication_actor::{AuthenticationActor, Credentials},
+    authentication_token_store_actor::AuthenticationTokenStoreActor,
+};
 use axum::{
     Json, Router,
     body::Body,
@@ -90,6 +94,20 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&config.listen_address).await?;
 
+    let (authentication_token_store_actor_sender, authentication_token_store_actor_receiver) =
+        mpsc::channel(8);
+
+    let weak_authentication_token_store_actor_sender =
+        authentication_token_store_actor_sender.downgrade();
+
+    let authentication_token_store_actor = AuthenticationTokenStoreActor::new(
+        config.auth_token_cleanup_interval,
+        config.auth_token_ttl,
+        config.auth_token_max_per_user,
+    );
+
+    join_set.spawn(authentication_token_store_actor.run(authentication_token_store_actor_receiver));
+
     let (authentication_actor_sender, authentication_actor_receiver) = mpsc::channel(8);
 
     let weak_authentication_actor_sender = authentication_actor_sender.downgrade();
@@ -97,9 +115,7 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
     let authentication_actor = AuthenticationActor::new(
         config.auth_user,
         config.auth_pass_argon2,
-        config.auth_token_cleanup_interval,
-        config.auth_token_ttl,
-        config.auth_token_max_per_user,
+        authentication_token_store_actor_sender.clone(),
     );
 
     join_set.spawn(authentication_actor.run(authentication_actor_receiver));
@@ -107,7 +123,7 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
     let (file_tracker_actor_sender, file_tracker_actor_receiver) = mpsc::channel(8);
 
     let file_tracker_actor = FileTrackerActor::new(
-        authentication_actor_sender.clone(),
+        authentication_token_store_actor_sender,
         config.auth_token_ttl * 9 / 10,
     );
 
@@ -137,14 +153,15 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
     };
 
     let logout_handler = {
-        let weak_authentication_actor_sender = weak_authentication_actor_sender.clone();
+        let weak_authentication_token_store_actor_sender =
+            weak_authentication_token_store_actor_sender.clone();
         async move |req: Request<Body>| -> std::result::Result<String, axum::response::Response> {
-            if let Some(strong_authentication_actor_sender) =
-                weak_authentication_actor_sender.upgrade()
+            if let Some(strong_authentication_token_store_actor_sender) =
+                weak_authentication_token_store_actor_sender.upgrade()
             {
                 if let Some(auth_token) = AuthenticationActor::extract_token(&req.headers())
-                    && let Ok(_) = AuthenticationActor::revoke_token(
-                        strong_authentication_actor_sender,
+                    && let Ok(_) = AuthenticationTokenStoreActor::revoke_token(
+                        strong_authentication_token_store_actor_sender,
                         auth_token,
                     )
                     .await

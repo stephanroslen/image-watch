@@ -1,7 +1,8 @@
-use crate::authentication_actor::AuthenticationActorEvent;
+use crate::authentication::{
+    Token, authentication_token_store_actor::AuthenticationTokenStoreActorEvent,
+};
 use crate::web_socket_actor::WebSocketActorEvent;
 use crate::{
-    authentication_actor,
     error::Result,
     file_change_data::{FileAddData, FileChangeData, FileRemoveData},
     web_socket_actor::WebSocketActor,
@@ -26,20 +27,20 @@ impl WebSocketActorSenderAndJoinHandle {
 #[derive(Debug)]
 pub enum FileTrackerActorEvent {
     Change(FileChangeData),
-    AddWebSocket(WebSocket, authentication_actor::Token),
+    AddWebSocket(WebSocket, Token),
 }
 
 #[derive(Debug)]
 pub struct FileTrackerActor {
     baseline: FileAddData,
     web_socket_actor_senders_and_join_handles: Vec<WebSocketActorSenderAndJoinHandle>,
-    authentication_actor_sender: mpsc::Sender<AuthenticationActorEvent>,
+    authentication_token_store_actor_sender: mpsc::Sender<AuthenticationTokenStoreActorEvent>,
     token_refresh_interval: std::time::Duration,
 }
 
 impl FileTrackerActor {
     pub fn new(
-        authentication_actor_sender: mpsc::Sender<AuthenticationActorEvent>,
+        authentication_token_store_actor_sender: mpsc::Sender<AuthenticationTokenStoreActorEvent>,
         token_refresh_interval: std::time::Duration,
     ) -> Self {
         let baseline = FileAddData::new();
@@ -48,7 +49,7 @@ impl FileTrackerActor {
         Self {
             baseline,
             web_socket_actor_senders_and_join_handles,
-            authentication_actor_sender,
+            authentication_token_store_actor_sender,
             token_refresh_interval,
         }
     }
@@ -131,7 +132,7 @@ impl FileTrackerActor {
                     let (sender, receiver) = mpsc::channel::<_>(8);
                     let ws_actor = WebSocketActor::new(
                         ws,
-                        self.authentication_actor_sender.clone(),
+                        self.authentication_token_store_actor_sender.clone(),
                         self.token_refresh_interval,
                         token,
                     );
@@ -189,7 +190,7 @@ impl FileTrackerActor {
     pub async fn add_web_socket(
         sender: &mpsc::Sender<FileTrackerActorEvent>,
         ws: WebSocket,
-        token: authentication_actor::Token,
+        token: Token,
     ) -> Result<()> {
         sender
             .send(FileTrackerActorEvent::AddWebSocket(ws, token))
