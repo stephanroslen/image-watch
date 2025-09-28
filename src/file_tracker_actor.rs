@@ -54,7 +54,7 @@ impl FileTrackerActor {
         }
     }
 
-    #[instrument]
+    #[instrument(level = "trace")]
     async fn handle_change(&mut self, change: FileChangeData) {
         tracing::info!("known files changed: {:?}", &change);
 
@@ -119,16 +119,14 @@ impl FileTrackerActor {
         self.baseline = FileAddData(new_baseline);
     }
 
-    #[instrument]
+    #[instrument(level = "trace")]
     pub async fn run(mut self, mut receiver: mpsc::Receiver<FileTrackerActorEvent>) {
-        tracing::debug!("actor started");
         while let Some(msg) = receiver.recv().await {
             match msg {
                 FileTrackerActorEvent::Change(change) => {
                     self.handle_change(change).await;
                 }
                 FileTrackerActorEvent::AddWebSocket(ws, token) => {
-                    tracing::debug!("adding web socket");
                     let (sender, receiver) = mpsc::channel::<_>(8);
                     let ws_actor = WebSocketActor::new(
                         ws,
@@ -166,8 +164,6 @@ impl FileTrackerActor {
         }
 
         self.shutdown_web_socket_actor_handlers().await;
-
-        tracing::debug!("actor stopped");
     }
 
     async fn shutdown_web_socket_actor_handlers(mut self) {

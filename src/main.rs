@@ -39,7 +39,7 @@ struct WsState {
     file_tracker_actor_sender: mpsc::WeakSender<FileTrackerActorEvent>,
 }
 
-#[instrument]
+#[instrument(level = "trace")]
 async fn ws_handler(
     ws: WebSocketUpgrade,
     headers: axum::http::HeaderMap,
@@ -50,7 +50,6 @@ async fn ws_handler(
     ws.on_upgrade(async move |socket| {
         let file_tracker_actor_sender = state.file_tracker_actor_sender.upgrade();
         if let Some(file_tracker_actor_sender) = file_tracker_actor_sender {
-            tracing::debug!("got file tracker actor sender");
             FileTrackerActor::add_web_socket(&file_tracker_actor_sender, socket, token)
                 .await
                 .expect("Expected to be able to add web socket");
@@ -84,7 +83,13 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
         .with_default_directive(LevelFilter::INFO.into())
         .from_env_lossy();
 
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_span_events(
+            tracing_subscriber::fmt::format::FmtSpan::NEW
+                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+        )
+        .init();
 
     let frontend_hash = frontend::frontend_hash();
 
@@ -204,8 +209,10 @@ async fn image_watch(join_set: &mut JoinSet<()>) -> Result<()> {
         }))
         .layer(
             TraceLayer::new_for_http()
-                .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
-                .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
+                .make_span_with(trace::DefaultMakeSpan::new().level(Level::TRACE))
+                .on_response(trace::DefaultOnResponse::new().level(Level::INFO))
+                .on_request(trace::DefaultOnRequest::new().level(Level::INFO))
+                .on_failure(trace::DefaultOnFailure::new().level(Level::ERROR)),
         )
         .layer(
             CompressionLayer::new()

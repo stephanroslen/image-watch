@@ -42,6 +42,7 @@ impl WebSocketActor {
         }
     }
 
+    #[instrument(level = "trace")]
     async fn ws_send_change(&mut self, change: FileChangeData) -> Result<()> {
         Ok(self
             .ws
@@ -49,6 +50,7 @@ impl WebSocketActor {
             .await?)
     }
 
+    #[instrument(level = "trace")]
     fn ws_send_close_frame(
         &mut self,
     ) -> impl Future<Output = std::result::Result<(), axum::Error>> {
@@ -58,9 +60,8 @@ impl WebSocketActor {
         })))
     }
 
-    #[instrument]
+    #[instrument(level = "trace")]
     pub async fn run(mut self, mut receiver: mpsc::Receiver<WebSocketActorEvent>) {
-        tracing::debug!("actor started");
         loop {
             tokio::select! {
                 msg = receiver.recv() => {
@@ -92,9 +93,9 @@ impl WebSocketActor {
                 }
             }
         }
-        tracing::debug!("actor stopped");
     }
 
+    #[instrument(level = "trace")]
     pub async fn send_change(
         sender: &mpsc::Sender<WebSocketActorEvent>,
         change: FileChangeData,

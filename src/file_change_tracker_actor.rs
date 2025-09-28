@@ -39,7 +39,7 @@ impl FileChangeTrackerActor {
         }
     }
 
-    #[instrument]
+    #[instrument(level = "trace")]
     async fn rescrape(&mut self) -> crate::error::Result<()> {
         let known_files = take(&mut self.known_files);
         let path_prefix = self.path_prefix.clone();
@@ -101,9 +101,8 @@ impl FileChangeTrackerActor {
         Ok(())
     }
 
-    #[instrument]
+    #[instrument(level = "trace")]
     pub async fn run(mut self, mut receiver: mpsc::Receiver<()>) {
-        tracing::debug!("actor started");
         loop {
             tokio::select! {
                 msg = receiver.recv() => match msg {
@@ -115,6 +114,5 @@ impl FileChangeTrackerActor {
                 }
             }
         }
-        tracing::debug!("actor stopped");
     }
 }

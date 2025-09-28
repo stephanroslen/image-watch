@@ -12,7 +12,7 @@ use std::hash::{Hash, Hasher};
 #[folder = "frontend/dist/"]
 struct Frontend;
 
-#[tracing::instrument]
+#[tracing::instrument(level = "trace")]
 pub async fn serve_frontend(
     path: Option<Path<String>>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {

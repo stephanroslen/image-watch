@@ -101,9 +101,8 @@ impl AuthenticationActor {
         }
     }
 
-    #[instrument]
+    #[instrument(level = "trace")]
     pub async fn run(mut self, mut receiver: mpsc::Receiver<AuthenticationActorEvent>) {
-        tracing::debug!("actor started");
         loop {
             tokio::select! {
                 msg = receiver.recv() => match msg {
@@ -141,7 +140,6 @@ impl AuthenticationActor {
                 },
             }
         }
-        tracing::debug!("stopped");
     }
 
     pub async fn auth_request(

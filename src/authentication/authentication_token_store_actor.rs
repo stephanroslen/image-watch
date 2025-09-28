@@ -3,6 +3,7 @@ use tokio::{
     sync::{mpsc, oneshot},
     time::{Interval, MissedTickBehavior},
 };
+use tracing::instrument;
 
 pub enum AuthenticationTokenStoreActorEvent {
     CheckAndRefreshToken {
@@ -18,6 +19,7 @@ pub enum AuthenticationTokenStoreActorEvent {
     },
 }
 
+#[derive(Debug)]
 pub struct AuthenticationTokenStoreActor {
     tokens: std::collections::HashMap<Token, Username>,
     token_deadlines:
@@ -47,6 +49,7 @@ impl AuthenticationTokenStoreActor {
         self.tokens.remove(&token);
     }
 
+    #[instrument(level = "trace")]
     async fn cleanup(&mut self) {
         let now = std::time::Instant::now();
 
@@ -81,8 +84,8 @@ impl AuthenticationTokenStoreActor {
         token
     }
 
+    #[instrument(level = "trace")]
     pub async fn run(mut self, mut receiver: mpsc::Receiver<AuthenticationTokenStoreActorEvent>) {
-        tracing::debug!("actor started");
         loop {
             tokio::select! {
                 msg = receiver.recv() => match msg {
@@ -109,7 +112,6 @@ impl AuthenticationTokenStoreActor {
                 }
             }
         }
-        tracing::debug!("stopped");
     }
 
     pub async fn check_and_refresh_token(
